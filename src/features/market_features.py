@@ -191,7 +191,11 @@ class FeatureEngineer:
         
         # Calculate rolling correlations with other symbols
         for other_symbol in other_symbols[:2]:  # Limit to 2 other symbols
-            other_df = all_data[other_symbol]
+            other_df = all_data[other_symbol].copy()
+            
+            # Ensure other_df has returns calculated
+            if 'return' not in other_df.columns:
+                other_df['return'] = other_df['close'].pct_change()
             
             if len(other_df) > 0:
                 # Align dates

@@ -107,10 +107,18 @@ class MarketInsightPlatform:
             
             # 6. Explainability
             self.logger.info("Step 6: Model Explainability")
-            explainer = ModelExplainability(self.config, self.logger)
-            explainability_results = explainer.compute_shap(xgb_results['model'], 
-                                                          xgb_results['X_test'], 
-                                                          xgb_results['feature_names'])
+            
+            # Only run explainability if XGBoost trained successfully
+            explainability_results = {}
+            if xgb_results and 'model' in xgb_results and xgb_results['model'] is not None:
+                explainer = ModelExplainability(self.config, self.logger)
+                explainability_results = explainer.compute_shap(
+                    xgb_results['model'], 
+                    xgb_results['X_test'], 
+                    xgb_results['feature_names']
+                )
+            else:
+                self.logger.warning("Skipping explainability - no trained XGBoost models available")
             
             self.logger.info("Batch pipeline completed successfully")
             
