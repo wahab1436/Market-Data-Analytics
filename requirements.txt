@@ -1,0 +1,36 @@
+# Market Insight Platform - Local Analytics MVP
+# Python 3.13 | Plotly Dash | Strict Version Pinning
+
+# Core Data Science
+numpy==1.26.4
+pandas==2.2.1
+scikit-learn==1.4.1.post1
+scipy==1.12.0
+
+# Machine Learning
+xgboost==2.0.3
+shap==0.44.1
+
+# Visualization
+plotly==5.19.0
+dash==2.15.0
+dash-bootstrap-components==1.5.0
+
+# Data Processing & Storage
+pyarrow==15.0.2
+polars==0.20.7
+
+# API & Web
+requests==2.31.0
+tenacity==8.2.3
+
+# Configuration & Utilities
+PyYAML==6.0.1
+python-dotenv==1.0.0
+
+# Development & Testing
+pytest==8.0.0
+pytest-mock==3.12.0
+
+# Logging
+structlog==24.1.0
