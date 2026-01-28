@@ -19,292 +19,682 @@ def create_layout(config: Dict[str, Any], disclaimer_text: str) -> html.Div:
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
     # Header with navigation
-    header = dbc.Navbar(
-        dbc.Container([
-            dbc.Row([
-                dbc.Col([
-                    html.H1("Market Insight Platform", className="navbar-title"),
-                    html.P("Local Analytics MVP | Portfolio Demonstration", 
-                          className="navbar-subtitle")
-                ], width="auto"),
-            ], align="center", className="g-0"),
+    header = html.Div([
+        html.Div([
+            html.Div([
+                html.H1("Market Insight Platform", style={
+                    'color': 'white',
+                    'margin': '0',
+                    'fontSize': '28px',
+                    'fontWeight': '600',
+                    'letterSpacing': '-0.5px'
+                }),
+                html.P("Advanced Analytics Dashboard", style={
+                    'color': 'rgba(255,255,255,0.85)',
+                    'margin': '5px 0 0 0',
+                    'fontSize': '14px',
+                    'fontWeight': '400'
+                })
+            ], style={'flex': '1'}),
             
-            dbc.NavbarToggler(id="navbar-toggler", n_clicks=0),
-            
-            dbc.Collapse(
-                dbc.Nav([
-                    dbc.NavItem(dbc.NavLink("Price Analysis", href="#price-section")),
-                    dbc.NavItem(dbc.NavLink("Volatility", href="#volatility-section")),
-                    dbc.NavItem(dbc.NavLink("Volume", href="#volume-section")),
-                    dbc.NavItem(dbc.NavLink("Similarity", href="#similarity-section")),
-                    dbc.NavItem(dbc.NavLink("Models", href="#models-section")),
-                    dbc.NavItem(dbc.NavLink("Explainability", href="#explainability-section")),
-                ], className="ms-auto", navbar=True),
-                id="navbar-collapse",
-                navbar=True,
-            ),
-        ], fluid=True),
-        color="primary",
-        dark=True,
-        className="mb-4",
-        style={"boxShadow": "0 2px 10px rgba(0,0,0,0.1)"}
-    )
+            html.Div([
+                html.Div(f"Last Update: {current_time}", style={
+                    'color': 'rgba(255,255,255,0.75)',
+                    'fontSize': '13px',
+                    'padding': '8px 16px',
+                    'background': 'rgba(255,255,255,0.1)',
+                    'borderRadius': '6px',
+                    'border': '1px solid rgba(255,255,255,0.15)'
+                })
+            ])
+        ], style={
+            'maxWidth': '1400px',
+            'margin': '0 auto',
+            'padding': '24px 32px',
+            'display': 'flex',
+            'alignItems': 'center',
+            'justifyContent': 'space-between'
+        })
+    ], style={
+        'background': 'linear-gradient(135deg, #1e3c72 0%, #2a5298 100%)',
+        'boxShadow': '0 4px 6px rgba(0,0,0,0.1)',
+        'marginBottom': '0'
+    })
     
     # Symbol selector and controls
-    controls_card = dbc.Card([
-        dbc.CardHeader("Controls", className="fw-bold"),
-        dbc.CardBody([
+    controls_card = html.Div([
+        html.Div([
+            html.H3("Controls", style={
+                'fontSize': '18px',
+                'fontWeight': '600',
+                'marginBottom': '24px',
+                'color': '#1e3c72',
+                'borderBottom': '2px solid #e8f0fe',
+                'paddingBottom': '12px'
+            }),
+            
             html.Div([
-                html.Label("Select Asset:", className="form-label"),
+                html.Label("Select Asset", style={
+                    'fontSize': '13px',
+                    'fontWeight': '600',
+                    'color': '#5f6368',
+                    'textTransform': 'uppercase',
+                    'letterSpacing': '0.5px',
+                    'marginBottom': '8px',
+                    'display': 'block'
+                }),
                 dcc.Dropdown(
                     id="symbol-selector",
                     options=[{"label": s, "value": s} for s in symbols],
                     value=symbols[0] if symbols else None,
                     clearable=False,
-                    className="mb-3"
+                    style={
+                        'marginBottom': '24px',
+                        'fontSize': '14px'
+                    }
                 ),
-                
-                html.Label("Date Range:", className="form-label"),
+            ]),
+            
+            html.Div([
+                html.Label("Date Range", style={
+                    'fontSize': '13px',
+                    'fontWeight': '600',
+                    'color': '#5f6368',
+                    'textTransform': 'uppercase',
+                    'letterSpacing': '0.5px',
+                    'marginBottom': '8px',
+                    'display': 'block'
+                }),
                 dcc.DatePickerRange(
                     id="date-range",
                     start_date=config['data']['date_range']['start'],
                     end_date=config['data']['date_range']['end'],
                     display_format='YYYY-MM-DD',
-                    className="mb-3"
+                    style={'marginBottom': '24px'}
                 ),
-                
-                html.Label("Analysis Focus:", className="form-label"),
+            ]),
+            
+            html.Div([
+                html.Label("Analysis Focus", style={
+                    'fontSize': '13px',
+                    'fontWeight': '600',
+                    'color': '#5f6368',
+                    'textTransform': 'uppercase',
+                    'letterSpacing': '0.5px',
+                    'marginBottom': '12px',
+                    'display': 'block'
+                }),
                 dcc.RadioItems(
                     id="analysis-focus",
                     options=[
                         {'label': 'Price & Trends', 'value': 'price'},
                         {'label': 'Risk & Volatility', 'value': 'volatility'},
                         {'label': 'Volume & Liquidity', 'value': 'volume'},
-                        {'label': 'Patterns & Similarity', 'value': 'similarity'}
+                        {'label': 'Pattern Analysis', 'value': 'similarity'}
                     ],
                     value='price',
-                    className="mb-3"
+                    labelStyle={
+                        'display': 'block',
+                        'marginBottom': '10px',
+                        'fontSize': '14px',
+                        'color': '#202124'
+                    },
+                    style={'marginBottom': '24px'}
                 ),
-                
-                dbc.Button(
-                    "Refresh View",
-                    id="refresh-button",
-                    color="primary",
-                    className="w-100",
-                    n_clicks=0
-                ),
-            ])
-        ]),
-        dbc.CardFooter(f"Last Updated: {current_time}", className="text-muted small")
-    ], className="h-100")
+            ]),
+            
+            html.Button(
+                "Refresh Data",
+                id="refresh-button",
+                n_clicks=0,
+                style={
+                    'width': '100%',
+                    'padding': '12px 24px',
+                    'fontSize': '14px',
+                    'fontWeight': '600',
+                    'color': 'white',
+                    'background': 'linear-gradient(135deg, #1e3c72 0%, #2a5298 100%)',
+                    'border': 'none',
+                    'borderRadius': '6px',
+                    'cursor': 'pointer',
+                    'transition': 'all 0.3s ease',
+                    'boxShadow': '0 2px 4px rgba(0,0,0,0.1)'
+                }
+            ),
+        ], style={
+            'background': 'white',
+            'borderRadius': '12px',
+            'padding': '24px',
+            'boxShadow': '0 2px 8px rgba(0,0,0,0.08)',
+            'border': '1px solid #e8eaed'
+        })
+    ])
     
-    # KPI Cards (will be populated dynamically)
-    kpi_cards = dbc.Row([
-        dbc.Col(create_kpi_card("Current Price", "$--", "primary", "price-kpi"), width=3),
-        dbc.Col(create_kpi_card("Daily Return", "--%", "success", "return-kpi"), width=3),
-        dbc.Col(create_kpi_card("20-day Vol", "--%", "warning", "volatility-kpi"), width=3),
-        dbc.Col(create_kpi_card("Avg Volume", "--", "info", "volume-kpi"), width=3),
-    ], className="g-3 mb-4")
+    # KPI Cards
+    kpi_cards = html.Div([
+        create_kpi_card("Current Price", "$--", "#1e3c72", "price-kpi"),
+        create_kpi_card("Daily Return", "--%", "#0f9d58", "return-kpi"),
+        create_kpi_card("Volatility", "--%", "#f4b400", "volatility-kpi"),
+        create_kpi_card("Volume", "--", "#4285f4", "volume-kpi"),
+    ], style={
+        'display': 'grid',
+        'gridTemplateColumns': 'repeat(4, 1fr)',
+        'gap': '20px',
+        'marginBottom': '32px'
+    })
     
     # Main content sections
     content = html.Div([
         # Price Analysis Section
         html.Div([
-            html.H2("Price Analysis", className="section-title", id="price-section"),
-            html.Hr(),
-            dbc.Row([
-                dbc.Col([
-                    dcc.Loading(
-                        id="loading-price-chart",
-                        type="circle",
-                        children=dcc.Graph(id="price-chart", className="chart-container")
+            html.Div([
+                html.H2("Price Analysis", style={
+                    'fontSize': '24px',
+                    'fontWeight': '600',
+                    'color': '#202124',
+                    'marginBottom': '4px'
+                }),
+                html.P("Comprehensive price trends and technical indicators", style={
+                    'fontSize': '14px',
+                    'color': '#5f6368',
+                    'margin': '0'
+                })
+            ], style={'marginBottom': '24px'}),
+            
+            html.Div([
+                dcc.Loading(
+                    id="loading-price-chart",
+                    type="circle",
+                    color="#1e3c72",
+                    children=dcc.Graph(
+                        id="price-chart",
+                        config={'displayModeBar': False},
+                        style={'height': '500px'}
                     )
-                ], width=12)
-            ]),
-            dbc.Row([
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardHeader("Price Insights", className="fw-bold"),
-                        dbc.CardBody(id="price-insights")
-                    ], className="h-100")
-                ], width=6),
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardHeader("Trend Metrics", className="fw-bold"),
-                        dbc.CardBody(id="trend-metrics")
-                    ], className="h-100")
-                ], width=6)
-            ], className="g-3 mt-3")
-        ], className="section-container mb-5"),
+                )
+            ], style={
+                'background': 'white',
+                'borderRadius': '12px',
+                'padding': '24px',
+                'marginBottom': '20px',
+                'boxShadow': '0 2px 8px rgba(0,0,0,0.08)',
+                'border': '1px solid #e8eaed'
+            }),
+            
+            html.Div([
+                html.Div([
+                    html.Div([
+                        html.H3("Key Insights", style={
+                            'fontSize': '16px',
+                            'fontWeight': '600',
+                            'color': '#202124',
+                            'marginBottom': '16px'
+                        }),
+                        html.Div(id="price-insights", style={'fontSize': '14px', 'color': '#5f6368'})
+                    ], style={
+                        'background': 'white',
+                        'borderRadius': '12px',
+                        'padding': '24px',
+                        'boxShadow': '0 2px 8px rgba(0,0,0,0.08)',
+                        'border': '1px solid #e8eaed',
+                        'height': '100%'
+                    })
+                ], style={'flex': '1', 'marginRight': '20px'}),
+                
+                html.Div([
+                    html.Div([
+                        html.H3("Performance Metrics", style={
+                            'fontSize': '16px',
+                            'fontWeight': '600',
+                            'color': '#202124',
+                            'marginBottom': '16px'
+                        }),
+                        html.Div(id="trend-metrics", style={'fontSize': '14px'})
+                    ], style={
+                        'background': 'white',
+                        'borderRadius': '12px',
+                        'padding': '24px',
+                        'boxShadow': '0 2px 8px rgba(0,0,0,0.08)',
+                        'border': '1px solid #e8eaed',
+                        'height': '100%'
+                    })
+                ], style={'flex': '1'})
+            ], style={'display': 'flex', 'gap': '0'})
+        ], id="price-section", style={'marginBottom': '48px'}),
         
         # Volatility Analysis Section
         html.Div([
-            html.H2("Volatility Analysis", className="section-title", id="volatility-section"),
-            html.Hr(),
-            dbc.Row([
-                dbc.Col([
+            html.Div([
+                html.H2("Volatility Analysis", style={
+                    'fontSize': '24px',
+                    'fontWeight': '600',
+                    'color': '#202124',
+                    'marginBottom': '4px'
+                }),
+                html.P("Risk assessment and return distribution", style={
+                    'fontSize': '14px',
+                    'color': '#5f6368',
+                    'margin': '0'
+                })
+            ], style={'marginBottom': '24px'}),
+            
+            html.Div([
+                html.Div([
                     dcc.Loading(
                         id="loading-volatility-chart",
                         type="circle",
-                        children=dcc.Graph(id="volatility-chart", className="chart-container")
+                        color="#1e3c72",
+                        children=dcc.Graph(
+                            id="volatility-chart",
+                            config={'displayModeBar': False},
+                            style={'height': '450px'}
+                        )
                     )
-                ], width=8),
-                dbc.Col([
+                ], style={'flex': '2', 'marginRight': '20px'}),
+                
+                html.Div([
                     dcc.Loading(
                         id="loading-volatility-distribution",
                         type="circle",
-                        children=dcc.Graph(id="volatility-distribution-chart", className="chart-container")
+                        color="#1e3c72",
+                        children=dcc.Graph(
+                            id="volatility-distribution-chart",
+                            config={'displayModeBar': False},
+                            style={'height': '450px'}
+                        )
                     )
-                ], width=4)
-            ]),
-            dbc.Row([
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardHeader("Volatility Insights", className="fw-bold"),
-                        dbc.CardBody(id="volatility-insights")
-                    ], className="h-100")
-                ], width=12)
-            ], className="g-3 mt-3")
-        ], className="section-container mb-5"),
+                ], style={'flex': '1'})
+            ], style={
+                'display': 'flex',
+                'background': 'white',
+                'borderRadius': '12px',
+                'padding': '24px',
+                'marginBottom': '20px',
+                'boxShadow': '0 2px 8px rgba(0,0,0,0.08)',
+                'border': '1px solid #e8eaed',
+                'gap': '0'
+            }),
+            
+            html.Div([
+                html.H3("Volatility Insights", style={
+                    'fontSize': '16px',
+                    'fontWeight': '600',
+                    'color': '#202124',
+                    'marginBottom': '16px'
+                }),
+                html.Div(id="volatility-insights", style={'fontSize': '14px', 'color': '#5f6368'})
+            ], style={
+                'background': 'white',
+                'borderRadius': '12px',
+                'padding': '24px',
+                'boxShadow': '0 2px 8px rgba(0,0,0,0.08)',
+                'border': '1px solid #e8eaed'
+            })
+        ], id="volatility-section", style={'marginBottom': '48px'}),
         
         # Volume Analysis Section
         html.Div([
-            html.H2("Volume Analysis", className="section-title", id="volume-section"),
-            html.Hr(),
-            dbc.Row([
-                dbc.Col([
-                    dcc.Loading(
-                        id="loading-volume-chart",
-                        type="circle",
-                        children=dcc.Graph(id="volume-chart", className="chart-container")
+            html.Div([
+                html.H2("Volume Analysis", style={
+                    'fontSize': '24px',
+                    'fontWeight': '600',
+                    'color': '#202124',
+                    'marginBottom': '4px'
+                }),
+                html.P("Trading volume and liquidity metrics", style={
+                    'fontSize': '14px',
+                    'color': '#5f6368',
+                    'margin': '0'
+                })
+            ], style={'marginBottom': '24px'}),
+            
+            html.Div([
+                dcc.Loading(
+                    id="loading-volume-chart",
+                    type="circle",
+                    color="#1e3c72",
+                    children=dcc.Graph(
+                        id="volume-chart",
+                        config={'displayModeBar': False},
+                        style={'height': '500px'}
                     )
-                ], width=12)
-            ]),
-            dbc.Row([
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardHeader("Volume-Price Relationship", className="fw-bold"),
-                        dbc.CardBody(id="volume-relationship")
-                    ], className="h-100")
-                ], width=6),
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardHeader("Volume Insights", className="fw-bold"),
-                        dbc.CardBody(id="volume-insights")
-                    ], className="h-100")
-                ], width=6)
-            ], className="g-3 mt-3")
-        ], className="section-container mb-5"),
+                )
+            ], style={
+                'background': 'white',
+                'borderRadius': '12px',
+                'padding': '24px',
+                'marginBottom': '20px',
+                'boxShadow': '0 2px 8px rgba(0,0,0,0.08)',
+                'border': '1px solid #e8eaed'
+            }),
+            
+            html.Div([
+                html.Div([
+                    html.Div([
+                        html.H3("Volume-Price Relationship", style={
+                            'fontSize': '16px',
+                            'fontWeight': '600',
+                            'color': '#202124',
+                            'marginBottom': '16px'
+                        }),
+                        html.Div(id="volume-relationship", style={'fontSize': '14px'})
+                    ], style={
+                        'background': 'white',
+                        'borderRadius': '12px',
+                        'padding': '24px',
+                        'boxShadow': '0 2px 8px rgba(0,0,0,0.08)',
+                        'border': '1px solid #e8eaed',
+                        'height': '100%'
+                    })
+                ], style={'flex': '1', 'marginRight': '20px'}),
+                
+                html.Div([
+                    html.Div([
+                        html.H3("Volume Insights", style={
+                            'fontSize': '16px',
+                            'fontWeight': '600',
+                            'color': '#202124',
+                            'marginBottom': '16px'
+                        }),
+                        html.Div(id="volume-insights", style={'fontSize': '14px', 'color': '#5f6368'})
+                    ], style={
+                        'background': 'white',
+                        'borderRadius': '12px',
+                        'padding': '24px',
+                        'boxShadow': '0 2px 8px rgba(0,0,0,0.08)',
+                        'border': '1px solid #e8eaed',
+                        'height': '100%'
+                    })
+                ], style={'flex': '1'})
+            ], style={'display': 'flex', 'gap': '0'})
+        ], id="volume-section", style={'marginBottom': '48px'}),
         
         # Similarity Analysis Section
         html.Div([
-            html.H2("Pattern Similarity", className="section-title", id="similarity-section"),
-            html.Hr(),
-            dbc.Row([
-                dbc.Col([
-                    dcc.Loading(
-                        id="loading-similarity-chart",
-                        type="circle",
-                        children=dcc.Graph(id="similarity-chart", className="chart-container")
+            html.Div([
+                html.H2("Pattern Similarity", style={
+                    'fontSize': '24px',
+                    'fontWeight': '600',
+                    'color': '#202124',
+                    'marginBottom': '4px'
+                }),
+                html.P("Historical pattern matching and analogous periods", style={
+                    'fontSize': '14px',
+                    'color': '#5f6368',
+                    'margin': '0'
+                })
+            ], style={'marginBottom': '24px'}),
+            
+            html.Div([
+                dcc.Loading(
+                    id="loading-similarity-chart",
+                    type="circle",
+                    color="#1e3c72",
+                    children=dcc.Graph(
+                        id="similarity-chart",
+                        config={'displayModeBar': False},
+                        style={'height': '450px'}
                     )
-                ], width=12)
-            ]),
-            dbc.Row([
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardHeader("Historical Analogs", className="fw-bold"),
-                        dbc.CardBody(id="analog-insights")
-                    ], className="h-100")
-                ], width=12)
-            ], className="g-3 mt-3")
-        ], className="section-container mb-5"),
+                )
+            ], style={
+                'background': 'white',
+                'borderRadius': '12px',
+                'padding': '24px',
+                'marginBottom': '20px',
+                'boxShadow': '0 2px 8px rgba(0,0,0,0.08)',
+                'border': '1px solid #e8eaed'
+            }),
+            
+            html.Div([
+                html.H3("Historical Analogs", style={
+                    'fontSize': '16px',
+                    'fontWeight': '600',
+                    'color': '#202124',
+                    'marginBottom': '16px'
+                }),
+                html.Div(id="analog-insights", style={'fontSize': '14px', 'color': '#5f6368'})
+            ], style={
+                'background': 'white',
+                'borderRadius': '12px',
+                'padding': '24px',
+                'boxShadow': '0 2px 8px rgba(0,0,0,0.08)',
+                'border': '1px solid #e8eaed'
+            })
+        ], id="similarity-section", style={'marginBottom': '48px'}),
         
         # Machine Learning Models Section
         html.Div([
-            html.H2("Model Analysis", className="section-title", id="models-section"),
-            html.Hr(),
-            dbc.Tabs([
-                dbc.Tab(label="Regression Models", tab_id="regression-tab"),
-                dbc.Tab(label="KNN Similarity", tab_id="knn-tab"),
-                dbc.Tab(label="XGBoost Predictions", tab_id="xgboost-tab"),
-            ], id="model-tabs", active_tab="regression-tab", className="mb-3"),
+            html.Div([
+                html.H2("Predictive Models", style={
+                    'fontSize': '24px',
+                    'fontWeight': '600',
+                    'color': '#202124',
+                    'marginBottom': '4px'
+                }),
+                html.P("Machine learning forecasts and performance analysis", style={
+                    'fontSize': '14px',
+                    'color': '#5f6368',
+                    'margin': '0'
+                })
+            ], style={'marginBottom': '24px'}),
             
-            html.Div(id="model-tab-content"),
-        ], className="section-container mb-5"),
+            html.Div([
+                dcc.Tabs(
+                    id="model-tabs",
+                    value="regression-tab",
+                    children=[
+                        dcc.Tab(
+                            label="Regression Models",
+                            value="regression-tab",
+                            style=tab_style,
+                            selected_style=tab_selected_style
+                        ),
+                        dcc.Tab(
+                            label="KNN Similarity",
+                            value="knn-tab",
+                            style=tab_style,
+                            selected_style=tab_selected_style
+                        ),
+                        dcc.Tab(
+                            label="XGBoost Predictions",
+                            value="xgboost-tab",
+                            style=tab_style,
+                            selected_style=tab_selected_style
+                        ),
+                    ],
+                    style={
+                        'marginBottom': '0',
+                        'borderBottom': '2px solid #e8eaed'
+                    }
+                ),
+                
+                html.Div(id="model-tab-content", style={
+                    'padding': '32px 24px',
+                    'background': 'white'
+                })
+            ], style={
+                'background': 'white',
+                'borderRadius': '12px',
+                'boxShadow': '0 2px 8px rgba(0,0,0,0.08)',
+                'border': '1px solid #e8eaed',
+                'overflow': 'hidden'
+            })
+        ], id="models-section", style={'marginBottom': '48px'}),
         
         # Explainability Section
         html.Div([
-            html.H2("Model Explainability", className="section-title", id="explainability-section"),
-            html.Hr(),
-            dbc.Row([
-                dbc.Col([
-                    dcc.Loading(
-                        id="loading-explainability-chart",
-                        type="circle",
-                        children=dcc.Graph(id="explainability-chart", className="chart-container")
+            html.Div([
+                html.H2("Model Explainability", style={
+                    'fontSize': '24px',
+                    'fontWeight': '600',
+                    'color': '#202124',
+                    'marginBottom': '4px'
+                }),
+                html.P("Feature importance and model interpretability", style={
+                    'fontSize': '14px',
+                    'color': '#5f6368',
+                    'margin': '0'
+                })
+            ], style={'marginBottom': '24px'}),
+            
+            html.Div([
+                dcc.Loading(
+                    id="loading-explainability-chart",
+                    type="circle",
+                    color="#1e3c72",
+                    children=dcc.Graph(
+                        id="explainability-chart",
+                        config={'displayModeBar': False},
+                        style={'height': '450px'}
                     )
-                ], width=12)
-            ]),
-            dbc.Row([
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardHeader("Model Insights", className="fw-bold"),
-                        dbc.CardBody(id="model-insights")
-                    ], className="h-100")
-                ], width=12)
-            ], className="g-3 mt-3")
-        ], className="section-container mb-5"),
+                )
+            ], style={
+                'background': 'white',
+                'borderRadius': '12px',
+                'padding': '24px',
+                'marginBottom': '20px',
+                'boxShadow': '0 2px 8px rgba(0,0,0,0.08)',
+                'border': '1px solid #e8eaed'
+            }),
+            
+            html.Div([
+                html.H3("Model Insights", style={
+                    'fontSize': '16px',
+                    'fontWeight': '600',
+                    'color': '#202124',
+                    'marginBottom': '16px'
+                }),
+                html.Div(id="model-insights", style={'fontSize': '14px', 'color': '#5f6368'})
+            ], style={
+                'background': 'white',
+                'borderRadius': '12px',
+                'padding': '24px',
+                'boxShadow': '0 2px 8px rgba(0,0,0,0.08)',
+                'border': '1px solid #e8eaed'
+            })
+        ], id="explainability-section", style={'marginBottom': '48px'}),
         
         # Cross-Symbol Analysis Section
         html.Div([
-            html.H2("Cross-Symbol Analysis", className="section-title", id="cross-symbol-section"),
-            html.Hr(),
-            dbc.Row([
-                dbc.Col([
+            html.Div([
+                html.H2("Cross-Symbol Analysis", style={
+                    'fontSize': '24px',
+                    'fontWeight': '600',
+                    'color': '#202124',
+                    'marginBottom': '4px'
+                }),
+                html.P("Comparative performance and correlation analysis", style={
+                    'fontSize': '14px',
+                    'color': '#5f6368',
+                    'margin': '0'
+                })
+            ], style={'marginBottom': '24px'}),
+            
+            html.Div([
+                html.Div([
                     dcc.Loading(
                         id="loading-correlation-chart",
                         type="circle",
-                        children=dcc.Graph(id="correlation-chart", className="chart-container")
+                        color="#1e3c72",
+                        children=dcc.Graph(
+                            id="correlation-chart",
+                            config={'displayModeBar': False},
+                            style={'height': '450px'}
+                        )
                     )
-                ], width=6),
-                dbc.Col([
+                ], style={'flex': '1', 'marginRight': '20px'}),
+                
+                html.Div([
                     dcc.Loading(
                         id="loading-performance-chart",
                         type="circle",
-                        children=dcc.Graph(id="performance-chart", className="chart-container")
+                        color="#1e3c72",
+                        children=dcc.Graph(
+                            id="performance-chart",
+                            config={'displayModeBar': False},
+                            style={'height': '450px'}
+                        )
                     )
-                ], width=6)
-            ]),
-            dbc.Row([
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardHeader("Cross-Symbol Insights", className="fw-bold"),
-                        dbc.CardBody(id="cross-symbol-insights")
-                    ], className="h-100")
-                ], width=12)
-            ], className="g-3 mt-3")
-        ], className="section-container mb-5"),
+                ], style={'flex': '1'})
+            ], style={
+                'display': 'flex',
+                'background': 'white',
+                'borderRadius': '12px',
+                'padding': '24px',
+                'marginBottom': '20px',
+                'boxShadow': '0 2px 8px rgba(0,0,0,0.08)',
+                'border': '1px solid #e8eaed',
+                'gap': '0'
+            }),
+            
+            html.Div([
+                html.H3("Cross-Symbol Insights", style={
+                    'fontSize': '16px',
+                    'fontWeight': '600',
+                    'color': '#202124',
+                    'marginBottom': '16px'
+                }),
+                html.Div(id="cross-symbol-insights", style={'fontSize': '14px', 'color': '#5f6368'})
+            ], style={
+                'background': 'white',
+                'borderRadius': '12px',
+                'padding': '24px',
+                'boxShadow': '0 2px 8px rgba(0,0,0,0.08)',
+                'border': '1px solid #e8eaed'
+            })
+        ], id="cross-symbol-section", style={'marginBottom': '48px'}),
     ])
     
-    # Footer with disclaimer
-    footer = dbc.Container([
-        html.Hr(),
+    # Footer
+    footer = html.Div([
         html.Div([
-            html.H5("Disclaimer", className="mb-3"),
-            html.P(disclaimer_text, className="small"),
-            html.P([
-                "This dashboard is for demonstration purposes only. ",
-                html.Strong("Not financial advice."),
-                " Use at your own risk."
-            ], className="small text-muted mt-2"),
             html.Div([
-                html.Span("Market Insight Platform v1.0.0", className="me-3"),
-                html.Span("Local-First MVP", className="me-3"),
-                html.Span("Python 3.13 | Plotly Dash", className="me-3"),
-                html.Span(f"Data as of: {current_time}")
-            ], className="small text-muted mt-3")
-        ], className="py-4")
-    ], fluid=True)
+                html.H4("Disclaimer", style={
+                    'fontSize': '16px',
+                    'fontWeight': '600',
+                    'color': '#202124',
+                    'marginBottom': '12px'
+                }),
+                html.P(disclaimer_text, style={
+                    'fontSize': '13px',
+                    'color': '#5f6368',
+                    'lineHeight': '1.6',
+                    'marginBottom': '8px'
+                }),
+                html.P([
+                    "This platform is for demonstration and educational purposes only. ",
+                    html.Strong("Not financial advice. "),
+                    "All data may be delayed or inaccurate. Past performance does not guarantee future results."
+                ], style={
+                    'fontSize': '13px',
+                    'color': '#5f6368',
+                    'lineHeight': '1.6'
+                })
+            ], style={'marginBottom': '20px'}),
+            
+            html.Div([
+                html.Div([
+                    html.Span("Market Insight Platform v1.0", style={'marginRight': '20px'}),
+                    html.Span("Python 3.13", style={'marginRight': '20px'}),
+                    html.Span("Plotly Dash", style={'marginRight': '20px'}),
+                    html.Span(f"Updated: {current_time}")
+                ], style={
+                    'fontSize': '12px',
+                    'color': '#80868b',
+                    'paddingTop': '16px',
+                    'borderTop': '1px solid #e8eaed'
+                })
+            ])
+        ], style={
+            'maxWidth': '1400px',
+            'margin': '0 auto',
+            'padding': '32px'
+        })
+    ], style={
+        'background': '#f8f9fa',
+        'marginTop': '48px',
+        'borderTop': '1px solid #e8eaed'
+    })
     
     # Main layout
     layout = html.Div([
@@ -312,277 +702,251 @@ def create_layout(config: Dict[str, Any], disclaimer_text: str) -> html.Div:
         dcc.Store(id='analysis-data-store'),
         dcc.Store(id='model-data-store'),
         dcc.Store(id='featured-data-store'),
+        dcc.Location(id='url', refresh=False),
         
         # Header
         header,
         
         # Main container
-        dbc.Container([
-            dbc.Row([
+        html.Div([
+            html.Div([
                 # Sidebar controls
-                dbc.Col(controls_card, width=3, className="sidebar"),
+                html.Div(controls_card, style={'marginRight': '32px', 'width': '300px', 'flexShrink': '0'}),
                 
                 # Main content
-                dbc.Col([
+                html.Div([
                     # KPI Cards
                     kpi_cards,
                     
                     # Main content
                     content
-                ], width=9)
-            ]),
+                ], style={'flex': '1', 'minWidth': '0'})
+            ], style={
+                'display': 'flex',
+                'maxWidth': '1400px',
+                'margin': '32px auto',
+                'padding': '0 32px'
+            }),
             
             # Footer
             footer
             
-        ], fluid=True, className="dashboard-container")
-    ])
+        ], style={'background': '#f8f9fa', 'minHeight': '100vh'})
+    ], style={
+        'fontFamily': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+        'margin': '0',
+        'padding': '0'
+    })
     
     return layout
 
 
-def create_kpi_card(title: str, value: str, color: str, kpi_id: str) -> dbc.Card:
+def create_kpi_card(title: str, value: str, color: str, kpi_id: str) -> html.Div:
     """Create a KPI card component."""
-    color_map = {
-        "primary": "#2E86AB",
-        "success": "#18A558",
-        "warning": "#F18F01",
-        "danger": "#C73E1D",
-        "info": "#A23B72"
-    }
-    
-    return dbc.Card([
-        dbc.CardBody([
-            html.H6(title, className="card-subtitle mb-2 text-muted"),
-            html.H3(id=kpi_id, children=value, className="card-title fw-bold"),
-            html.Div(id=f"{kpi_id}-trend", className="small")
+    return html.Div([
+        html.Div([
+            html.Div(title, style={
+                'fontSize': '13px',
+                'fontWeight': '600',
+                'color': '#5f6368',
+                'textTransform': 'uppercase',
+                'letterSpacing': '0.5px',
+                'marginBottom': '12px'
+            }),
+            html.Div(id=kpi_id, children=value, style={
+                'fontSize': '32px',
+                'fontWeight': '700',
+                'color': '#202124',
+                'marginBottom': '8px',
+                'lineHeight': '1'
+            }),
+            html.Div(id=f"{kpi_id}-trend", style={
+                'fontSize': '13px',
+                'fontWeight': '500',
+                'color': '#5f6368'
+            })
         ])
-    ], className="text-center border-0 shadow-sm", 
-       style={"borderLeft": f"4px solid {color_map.get(color, color_map['primary'])}"})
-
-
-def create_metric_card(title: str, value: Any, change: str = None) -> html.Div:
-    """Create a metric display card."""
-    card_content = [
-        html.H6(title, className="metric-title"),
-        html.H4(value, className="metric-value")
-    ]
-    
-    if change:
-        trend_class = "positive" if change.startswith("+") else "negative"
-        card_content.append(html.Span(change, className=f"metric-change {trend_class}"))
-    
-    return html.Div(card_content, className="metric-card")
-
-
-def create_insight_card(insights: List[str]) -> html.Div:
-    """Create an insight display card."""
-    if not insights:
-        return html.Div("No insights available.", className="text-muted")
-    
-    insight_items = []
-    for i, insight in enumerate(insights):
-        insight_items.append(html.Li(insight, className="insight-item"))
-        if i < len(insights) - 1:
-            insight_items.append(html.Hr(className="my-2"))
-    
-    return html.Ul(insight_items, className="insight-list")
+    ], style={
+        'background': 'white',
+        'borderRadius': '12px',
+        'padding': '24px',
+        'boxShadow': '0 2px 8px rgba(0,0,0,0.08)',
+        'border': '1px solid #e8eaed',
+        'borderLeft': f'4px solid {color}',
+        'transition': 'transform 0.2s ease, box-shadow 0.2s ease'
+    })
 
 
 def create_model_tab_content(tab_id: str) -> html.Div:
     """Create content for model tabs."""
     if tab_id == "regression-tab":
         return html.Div([
-            dbc.Row([
-                dbc.Col([
+            html.Div([
+                html.Div([
                     dcc.Loading(
-                        children=dcc.Graph(id="regression-chart", className="chart-container")
+                        type="circle",
+                        color="#1e3c72",
+                        children=dcc.Graph(
+                            id="regression-chart",
+                            config={'displayModeBar': False},
+                            style={'height': '400px'}
+                        )
                     )
-                ], width=8),
-                dbc.Col([
+                ], style={'flex': '2', 'marginRight': '20px'}),
+                
+                html.Div([
                     dcc.Loading(
-                        children=dcc.Graph(id="regression-metrics-chart", className="chart-container")
+                        type="circle",
+                        color="#1e3c72",
+                        children=dcc.Graph(
+                            id="regression-metrics-chart",
+                            config={'displayModeBar': False},
+                            style={'height': '400px'}
+                        )
                     )
-                ], width=4)
-            ]),
-            dbc.Row([
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardHeader("Regression Insights", className="fw-bold"),
-                        dbc.CardBody(id="regression-insights")
-                    ])
-                ], width=12)
-            ], className="mt-3")
+                ], style={'flex': '1'})
+            ], style={'display': 'flex', 'marginBottom': '24px', 'gap': '0'}),
+            
+            html.Div([
+                html.H3("Regression Model Insights", style={
+                    'fontSize': '16px',
+                    'fontWeight': '600',
+                    'color': '#202124',
+                    'marginBottom': '16px'
+                }),
+                html.Div(id="regression-insights", style={'fontSize': '14px', 'color': '#5f6368'})
+            ], style={
+                'background': '#f8f9fa',
+                'borderRadius': '8px',
+                'padding': '20px',
+                'border': '1px solid #e8eaed'
+            })
         ])
     
     elif tab_id == "knn-tab":
         return html.Div([
-            dbc.Row([
-                dbc.Col([
-                    dcc.Loading(
-                        children=dcc.Graph(id="knn-chart", className="chart-container")
+            html.Div([
+                dcc.Loading(
+                    type="circle",
+                    color="#1e3c72",
+                    children=dcc.Graph(
+                        id="knn-chart",
+                        config={'displayModeBar': False},
+                        style={'height': '400px'}
                     )
-                ], width=12)
-            ]),
-            dbc.Row([
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardHeader("KNN Analogs", className="fw-bold"),
-                        dbc.CardBody(id="knn-analogs")
-                    ])
-                ], width=6),
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardHeader("KNN Insights", className="fw-bold"),
-                        dbc.CardBody(id="knn-insights")
-                    ])
-                ], width=6)
-            ], className="mt-3")
+                )
+            ], style={'marginBottom': '24px'}),
+            
+            html.Div([
+                html.Div([
+                    html.Div([
+                        html.H3("Historical Analogs", style={
+                            'fontSize': '16px',
+                            'fontWeight': '600',
+                            'color': '#202124',
+                            'marginBottom': '16px'
+                        }),
+                        html.Div(id="knn-analogs", style={'fontSize': '14px'})
+                    ], style={
+                        'background': '#f8f9fa',
+                        'borderRadius': '8px',
+                        'padding': '20px',
+                        'border': '1px solid #e8eaed',
+                        'height': '100%'
+                    })
+                ], style={'flex': '1', 'marginRight': '20px'}),
+                
+                html.Div([
+                    html.Div([
+                        html.H3("KNN Insights", style={
+                            'fontSize': '16px',
+                            'fontWeight': '600',
+                            'color': '#202124',
+                            'marginBottom': '16px'
+                        }),
+                        html.Div(id="knn-insights", style={'fontSize': '14px', 'color': '#5f6368'})
+                    ], style={
+                        'background': '#f8f9fa',
+                        'borderRadius': '8px',
+                        'padding': '20px',
+                        'border': '1px solid #e8eaed',
+                        'height': '100%'
+                    })
+                ], style={'flex': '1'})
+            ], style={'display': 'flex', 'gap': '0'})
         ])
     
     elif tab_id == "xgboost-tab":
         return html.Div([
-            dbc.Row([
-                dbc.Col([
+            html.Div([
+                html.Div([
                     dcc.Loading(
-                        children=dcc.Graph(id="xgboost-prediction-chart", className="chart-container")
+                        type="circle",
+                        color="#1e3c72",
+                        children=dcc.Graph(
+                            id="xgboost-prediction-chart",
+                            config={'displayModeBar': False},
+                            style={'height': '400px'}
+                        )
                     )
-                ], width=8),
-                dbc.Col([
+                ], style={'flex': '2', 'marginRight': '20px'}),
+                
+                html.Div([
                     dcc.Loading(
-                        children=dcc.Graph(id="xgboost-importance-chart", className="chart-container")
+                        type="circle",
+                        color="#1e3c72",
+                        children=dcc.Graph(
+                            id="xgboost-importance-chart",
+                            config={'displayModeBar': False},
+                            style={'height': '400px'}
+                        )
                     )
-                ], width=4)
-            ]),
-            dbc.Row([
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardHeader("XGBoost Performance", className="fw-bold"),
-                        dbc.CardBody(id="xgboost-metrics")
-                    ])
-                ], width=12)
-            ], className="mt-3")
+                ], style={'flex': '1'})
+            ], style={'display': 'flex', 'marginBottom': '24px', 'gap': '0'}),
+            
+            html.Div([
+                html.H3("XGBoost Performance Metrics", style={
+                    'fontSize': '16px',
+                    'fontWeight': '600',
+                    'color': '#202124',
+                    'marginBottom': '16px'
+                }),
+                html.Div(id="xgboost-metrics", style={'fontSize': '14px'})
+            ], style={
+                'background': '#f8f9fa',
+                'borderRadius': '8px',
+                'padding': '20px',
+                'border': '1px solid #e8eaed'
+            })
         ])
     
-    return html.Div("Select a model tab.", className="text-muted")
+    return html.Div("Select a model tab to view analysis.", style={
+        'fontSize': '14px',
+        'color': '#5f6368',
+        'padding': '40px',
+        'textAlign': 'center'
+    })
 
 
-# CSS styles inline (can also be in separate CSS file)
-styles = """
-.dashboard-container {
-    padding: 20px;
+# Tab styles
+tab_style = {
+    'padding': '16px 24px',
+    'fontSize': '14px',
+    'fontWeight': '500',
+    'border': 'none',
+    'borderBottom': '3px solid transparent',
+    'backgroundColor': 'white',
+    'color': '#5f6368',
+    'cursor': 'pointer',
+    'transition': 'all 0.3s ease'
 }
 
-.section-container {
-    background: white;
-    border-radius: 8px;
-    padding: 24px;
-    margin-bottom: 24px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+tab_selected_style = {
+    'padding': '16px 24px',
+    'fontSize': '14px',
+    'fontWeight': '600',
+    'border': 'none',
+    'borderBottom': '3px solid #1e3c72',
+    'backgroundColor': 'white',
+    'color': '#1e3c72'
 }
-
-.section-title {
-    color: #2E86AB;
-    margin-bottom: 16px;
-    font-weight: 600;
-}
-
-.chart-container {
-    background: white;
-    border-radius: 8px;
-    padding: 16px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-}
-
-.kpi-card {
-    text-align: center;
-    padding: 16px;
-    border-radius: 8px;
-    background: white;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-    border-left: 4px solid #2E86AB;
-}
-
-.kpi-value {
-    font-size: 24px;
-    font-weight: 700;
-    margin: 8px 0;
-}
-
-.kpi-label {
-    font-size: 14px;
-    color: #6c757d;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-.insight-list {
-    list-style-type: none;
-    padding-left: 0;
-    margin-bottom: 0;
-}
-
-.insight-item {
-    padding: 8px 0;
-    color: #495057;
-    font-size: 14px;
-    line-height: 1.5;
-}
-
-.insight-item:not(:last-child) {
-    border-bottom: 1px solid #e9ecef;
-}
-
-.metric-card {
-    padding: 12px;
-    background: #f8f9fa;
-    border-radius: 6px;
-    margin-bottom: 8px;
-}
-
-.metric-title {
-    font-size: 12px;
-    color: #6c757d;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-bottom: 4px;
-}
-
-.metric-value {
-    font-size: 18px;
-    font-weight: 600;
-    color: #212529;
-    margin-bottom: 4px;
-}
-
-.metric-change {
-    font-size: 12px;
-    font-weight: 500;
-}
-
-.metric-change.positive {
-    color: #18A558;
-}
-
-.metric-change.negative {
-    color: #C73E1D;
-}
-
-.sidebar {
-    background: #f8f9fa;
-    border-radius: 8px;
-    padding: 16px;
-}
-
-.navbar-title {
-    font-size: 24px;
-    font-weight: 700;
-    margin-bottom: 0;
-}
-
-.navbar-subtitle {
-    font-size: 14px;
-    color: rgba(255,255,255,0.8);
-    margin-bottom: 0;
-}
-"""

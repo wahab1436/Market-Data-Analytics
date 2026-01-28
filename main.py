@@ -149,7 +149,7 @@ class MarketInsightPlatform:
         
         # Create and run dashboard
         app = create_app(self.config)
-        app.run_server(
+        app.run(
             debug=False,
             host='127.0.0.1',
             port=8050,
