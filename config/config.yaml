@@ -12,13 +12,13 @@ data:
     - "MSFT"  # Microsoft Corporation
     - "GOOGL" # Alphabet Inc.
   date_range:
-    start: "2023-01-01"
-    end: "2024-01-01"
+    start: "2025-10-01"
+    end: "2026-01-29"
   api:
     provider: "alphavantage"  # Options: alphavantage, finnhub, marketstack
     base_url: "https://www.alphavantage.co/query"
     function: "TIME_SERIES_DAILY"
-    outputsize: "full"
+    outputsize: "compact"  # Changed from "full" to "compact" for free tier
     datatype: "json"
     rate_limit_seconds: 12  # Free tier limit
     max_retries: 3
@@ -32,7 +32,7 @@ features:
   
 models:
   validation:
-    train_test_split: "2023-10-01"
+    train_test_split: "2025-12-01"
     test_size: 0.2
   xgboost:
     n_estimators: 100

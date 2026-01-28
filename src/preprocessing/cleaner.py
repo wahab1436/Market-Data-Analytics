@@ -192,11 +192,10 @@ class DataCleaner:
         
         # Check for large gaps (potential errors)
         returns = df['close'].pct_change().dropna()
-        extreme_returns = (returns.abs() > 0.25).sum()  # >25% daily move
+        extreme_returns = (returns.abs() > 0.25).sum()
         
         if extreme_returns > 0:
             self.logger.warning(f"Found {extreme_returns} extreme returns (>25%) for {symbol}")
-            # Don't fail for this, just warn
         
         return True
     
@@ -253,7 +252,6 @@ class DataCleaner:
         
         for symbol, df in processed_data.items():
             df_copy = df.copy()
-            # Ensure all required columns are present
             for col in ['open', 'high', 'low', 'close', 'volume']:
                 if col not in df_copy.columns:
                     df_copy[col] = np.nan

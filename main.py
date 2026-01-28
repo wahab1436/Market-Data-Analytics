@@ -11,21 +11,21 @@ from pathlib import Path
 from typing import Dict, Any
 
 # Add src to path
-sys.path.insert(0, str(Path(__file__).parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent))
 
-from utils.logger import setup_logger
-from ingestion.api_fetcher import DataFetcher
-from preprocessing.cleaner import DataCleaner
-from features.market_features import FeatureEngineer
-from analysis.price_analysis import PriceAnalysis
-from analysis.volatility_analysis import VolatilityAnalysis
-from analysis.volume_analysis import VolumeAnalysis
-from analysis.similarity_analysis import SimilarityAnalysis
-from models.regression import RegressionModels
-from models.knn_similarity import KNNSimilarity
-from models.xgboost_model import XGBoostModel
-from models.explainability import ModelExplainability
-from dashboard.app import create_app
+from src.utils.logger import setup_logger
+from src.ingestion.api_fetcher import DataFetcher
+from src.preprocessing.cleaner import DataCleaner
+from src.features.market_features import FeatureEngineer
+from src.analysis.price_analysis import PriceAnalysis
+from src.analysis.volatility_analysis import VolatilityAnalysis
+from src.analysis.volume_analysis import VolumeAnalysis
+from src.analysis.similarity_analysis import SimilarityAnalysis
+from src.models.regression import RegressionModels
+from src.models.knn_similarity import KNNSimilarity
+from src.models.xgboost_model import XGBoostModel
+from src.models.explainability import ModelExplainability
+from src.dashboard.app import create_app
 
 
 class MarketInsightPlatform:
