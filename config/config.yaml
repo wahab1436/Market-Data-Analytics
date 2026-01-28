@@ -1,0 +1,72 @@
+# Market Insight Platform Configuration
+# Local-First MVP | Batch-Driven Analytics
+
+project:
+  name: "Market Insight Platform"
+  version: "1.0.0"
+  description: "Local-first market analytics MVP for portfolio demonstration"
+
+data:
+  symbols:
+    - "AAPL"  # Apple Inc.
+    - "MSFT"  # Microsoft Corporation
+    - "GOOGL" # Alphabet Inc.
+  date_range:
+    start: "2023-01-01"
+    end: "2024-01-01"
+  api:
+    provider: "alphavantage"  # Options: alphavantage, finnhub, marketstack
+    base_url: "https://www.alphavantage.co/query"
+    function: "TIME_SERIES_DAILY"
+    outputsize: "full"
+    datatype: "json"
+    rate_limit_seconds: 12  # Free tier limit
+    max_retries: 3
+    cache_duration_hours: 24
+
+features:
+  rolling_windows: [10, 20, 30, 50]
+  volatility_periods: [10, 20, 30]
+  moving_averages: [20, 50, 200]
+  lag_periods: [1, 5, 10]
+  
+models:
+  validation:
+    train_test_split: "2023-10-01"
+    test_size: 0.2
+  xgboost:
+    n_estimators: 100
+    max_depth: 3
+    learning_rate: 0.1
+    objective: "reg:squarederror"
+    eval_metric: "rmse"
+  knn:
+    n_neighbors: 5
+    metric: "euclidean"
+  regression:
+    alpha: [0.1, 1.0, 10.0]  # For Ridge/Lasso
+
+dashboard:
+  update_frequency: "daily"
+  max_points_display: 500
+  color_palette:
+    primary: "#2E86AB"
+    secondary: "#A23B72"
+    success: "#18A558"
+    warning: "#F18F01"
+    danger: "#C73E1D"
+    background: "#F8F9FA"
+    text: "#212529"
+  
+paths:
+  raw_data: "data/raw"
+  silver_data: "data/silver"
+  gold_data: "data/gold"
+  models: "data/models"
+  artifacts: "data/artifacts"
+  logs: "logs"
+
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "logs/market_insight.log"
