@@ -2,6 +2,7 @@
 """
 Market Insight Platform - Main Entry Point
 Local-First MVP | Batch-Driven Analytics
+Optimized for compact API output (100 days)
 """
 
 import argparse
@@ -34,6 +35,10 @@ class MarketInsightPlatform:
     def __init__(self, config_path: str = "config/config.yaml"):
         """Initialize the platform with configuration."""
         self.config = self.load_config(config_path)
+        
+        # Optimize config for compact mode if needed
+        self.optimize_for_compact_mode()
+        
         self.logger = setup_logger(self.config)
         self.mode = None
         
@@ -41,14 +46,51 @@ class MarketInsightPlatform:
         self.setup_directories()
         
     def load_config(self, config_path: str) -> Dict[str, Any]:
-        """Load configuration from YAML file."""
+        """Load configuration from YAML file with proper encoding."""
         try:
-            with open(config_path, 'r') as f:
+            # Try UTF-8 first (standard)
+            with open(config_path, 'r', encoding='utf-8') as f:
                 config = yaml.safe_load(f)
             return config
+        except UnicodeDecodeError:
+            # Fallback to UTF-8 with BOM
+            try:
+                with open(config_path, 'r', encoding='utf-8-sig') as f:
+                    config = yaml.safe_load(f)
+                return config
+            except Exception:
+                # Last resort: try latin-1
+                try:
+                    with open(config_path, 'r', encoding='latin-1') as f:
+                        config = yaml.safe_load(f)
+                    return config
+                except Exception as e:
+                    print(f"Error loading config: {e}")
+                    print("Please ensure config file is saved in UTF-8 encoding")
+                    sys.exit(1)
         except Exception as e:
             print(f"Error loading config: {e}")
             sys.exit(1)
+    
+    def optimize_for_compact_mode(self):
+        """Optimize feature windows for compact API mode (100 days)."""
+        if self.config.get('data', {}).get('api', {}).get('outputsize') == 'compact':
+            print("INFO: Detected compact mode - optimizing feature windows")
+            
+            # Reduce moving average windows to fit in 100 days
+            if 'features' in self.config:
+                # Original windows might be [20, 50, 200]
+                # Reduce to [10, 20, 50] for compact mode
+                original_mas = self.config['features'].get('moving_averages', [20, 50, 200])
+                if max(original_mas) > 50:
+                    self.config['features']['moving_averages'] = [10, 20, 50]
+                    print(f"INFO: Reduced moving averages from {original_mas} to [10, 20, 50]")
+                
+                # Reduce rolling windows
+                original_windows = self.config['features'].get('rolling_windows', [10, 20, 30, 50])
+                if max(original_windows) > 30:
+                    self.config['features']['rolling_windows'] = [5, 10, 20, 30]
+                    print(f"INFO: Reduced rolling windows from {original_windows} to [5, 10, 20, 30]")
     
     def setup_directories(self):
         """Create necessary directories."""
@@ -73,6 +115,11 @@ class MarketInsightPlatform:
     def run_batch_pipeline(self):
         """Execute the complete batch pipeline."""
         self.logger.info("Starting batch pipeline execution")
+        
+        # Log configuration
+        api_mode = self.config.get('data', {}).get('api', {}).get('outputsize', 'unknown')
+        self.logger.info(f"API Output Size: {api_mode}")
+        self.logger.info(f"Moving Averages: {self.config.get('features', {}).get('moving_averages', [])}")
         
         try:
             # 1. Data Ingestion
@@ -108,12 +155,19 @@ class MarketInsightPlatform:
                 data_summary[symbol] = len(df)
                 self.logger.info(f"{symbol}: {len(df)} records after feature engineering")
             
-            if all(count < 30 for count in data_summary.values()):
-                self.logger.warning("Insufficient data for model training. Need at least 30 records per symbol.")
-                self.logger.warning("Consider:")
-                self.logger.warning("  1. Changing config outputsize to 'full'")
-                self.logger.warning("  2. Extending date_range start date")
-                self.logger.warning("  3. Reducing moving_averages window sizes")
+            # Provide helpful warnings based on data availability
+            min_records = min(data_summary.values()) if data_summary else 0
+            if min_records < 10:
+                self.logger.error("CRITICAL: Less than 10 records per symbol. Pipeline cannot continue.")
+                self.logger.error("Solutions:")
+                self.logger.error("  1. Change outputsize to 'full' in config.yaml")
+                self.logger.error("  2. Extend date_range.start to earlier date")
+                self.logger.error("  3. Current mode is too restrictive for analysis")
+                sys.exit(1)
+            elif min_records < 30:
+                self.logger.warning("WARNING: Limited data available. Some models may not train.")
+                self.logger.warning(f"Records available: {min_records} (recommended: 30+)")
+                self.logger.warning("Consider changing outputsize to 'full' for better results.")
             
             # 4. Analysis
             self.logger.info("Step 4: Market Analysis")
@@ -184,12 +238,20 @@ class MarketInsightPlatform:
             self.logger.info("=" * 60)
             self.logger.info("BATCH PIPELINE SUMMARY")
             self.logger.info("=" * 60)
+            self.logger.info(f"API Mode: {api_mode}")
             self.logger.info(f"Symbols processed: {len(features_data)}")
             for symbol, count in data_summary.items():
                 self.logger.info(f"  - {symbol}: {count} records")
-            self.logger.info(f"Analysis modules: {len([r for r in analysis_results.values() if r])}")
+            self.logger.info(f"Analysis modules completed: {len([r for r in analysis_results.values() if r])}/4")
             self.logger.info(f"Models trained: Regression={bool(reg_results)}, KNN={bool(knn_results)}, XGBoost={bool(xgb_results)}")
             self.logger.info("=" * 60)
+            
+            # Provide recommendations based on results
+            if min_records < 50:
+                self.logger.info("RECOMMENDATION: For better model performance:")
+                self.logger.info("  - Change config.yaml: outputsize: 'full'")
+                self.logger.info("  - This will provide 500+ records instead of ~50")
+                self.logger.info("=" * 60)
             
             return {
                 'features': features_data,
@@ -272,6 +334,7 @@ class MarketInsightPlatform:
         print(f"Mode: {mode.upper()}")
         print(f"Symbols: {', '.join(self.config['data']['symbols'])}")
         print(f"Date Range: {self.config['data']['date_range']['start']} to {self.config['data']['date_range']['end']}")
+        print(f"API Output: {self.config.get('data', {}).get('api', {}).get('outputsize', 'unknown')}")
         print("=" * 60)
         print()
         
@@ -301,6 +364,12 @@ Examples:
   
   # Use custom config file
   python main.py --mode batch --config custom_config.yaml
+
+Notes:
+  - Compact mode (outputsize: compact) provides ~100 days of data
+  - Full mode (outputsize: full) provides up to 20 years of data
+  - Compact mode works but with reduced feature windows
+  - For best results, use full mode in config.yaml
         """
     )
     
