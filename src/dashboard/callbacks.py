@@ -4,7 +4,7 @@ Interactive callbacks for the Market Insight Platform dashboard
 Read-only: All data is precomputed, no computation in callbacks
 """
 
-from dash import Input, Output, State, callback_context, no_update
+from dash import Input, Output, State, callback_context, no_update, html
 import pandas as pd
 import numpy as np
 from pathlib import Path
