@@ -12,13 +12,13 @@ data:
     - "MSFT"  # Microsoft Corporation
     - "GOOGL" # Alphabet Inc.
   date_range:
-    start: "2025-10-01"
+    start: "2024-01-01"  # ← CHANGED: Extended to get 1+ year of data
     end: "2026-01-29"
   api:
     provider: "alphavantage"  # Options: alphavantage, finnhub, marketstack
     base_url: "https://www.alphavantage.co/query"
     function: "TIME_SERIES_DAILY"
-    outputsize: "compact"  # Changed from "full" to "compact" for free tier
+    outputsize: "full"  # ← CHANGED: From "compact" to "full" (gets up to 20 years)
     datatype: "json"
     rate_limit_seconds: 12  # Free tier limit
     max_retries: 3
@@ -27,7 +27,7 @@ data:
 features:
   rolling_windows: [10, 20, 30, 50]
   volatility_periods: [10, 20, 30]
-  moving_averages: [20, 50, 200]
+  moving_averages: [20, 50, 200]  # Now we have enough data for 200-day MA
   lag_periods: [1, 5, 10]
   
 models:
