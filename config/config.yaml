@@ -18,7 +18,7 @@ data:
     provider: "alphavantage"  # Options: alphavantage, finnhub, marketstack
     base_url: "https://www.alphavantage.co/query"
     function: "TIME_SERIES_DAILY"
-    outputsize: "full"  # ← CHANGED: From "compact" to "full" (gets up to 20 years)
+    outputsize: "compact"  # ← CHANGED: From "compact" to "full" (gets up to 20 years)
     datatype: "json"
     rate_limit_seconds: 12  # Free tier limit
     max_retries: 3
