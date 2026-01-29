@@ -28,7 +28,7 @@ data:
     provider: "alphavantage"
     base_url: "https://www.alphavantage.co/query"
     function: "TIME_SERIES_DAILY"
-    outputsize: "compact"
+    outputsize: "full"
     datatype: "json"
     rate_limit_seconds: 12
     max_retries: 3
