@@ -15,7 +15,7 @@ from typing import Dict, Any
 sys.path.insert(0, str(Path(__file__).parent))
 
 from src.utils.logger import setup_logger
-#from src.ingestion.api_fetcher import DataFetcher
+from src.ingestion.api_fetcher import DataFetcher
 from src.preprocessing.cleaner import DataCleaner
 from src.features.market_features import FeatureEngineer
 from src.analysis.price_analysis import PriceAnalysis
