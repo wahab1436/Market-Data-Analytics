@@ -1,5 +1,6 @@
 # Market Insight Platform Configuration
-# OPTIMIZED FOR FREE API + COMPACT MODE
+# ULTRA-OPTIMIZED FOR COMPACT MODE (100 days)
+# Minimizes feature window sizes to maximize usable data
 
 project:
   name: "Market Insight Platform"
@@ -7,17 +8,16 @@ project:
   description: "Local-first market analytics MVP for portfolio demonstration"
 
 data:
-  source: "api"  
+  source: "api"
   
   symbols:
     - "AAPL"
     - "MSFT"
     - "GOOGL"
   
-
   date_range:
-    start: "2025-09-01" 
-    end: "2026-01-29"    
+    start: "2025-09-01"
+    end: "2026-01-29"
   
   sample:
     enabled: true
@@ -29,32 +29,39 @@ data:
     provider: "alphavantage"
     base_url: "https://www.alphavantage.co/query"
     function: "TIME_SERIES_DAILY"
-    outputsize: "compact"  
+    outputsize: "compact"
     datatype: "json"
-    rate_limit_seconds: 15  
-    max_retries: 2  
-    cache_duration_hours: 168  
+    rate_limit_seconds: 15
+    max_retries: 2
+    cache_duration_hours: 168
 
+# ============================================================================
+# CRITICAL FIX: Reduced ALL feature windows to minimize data loss
+# Old config: Lost 59 rows (59% of 100!)
+# New config: Will lose ~20 rows (20% of 100) ✅
+# ============================================================================
 features:
-  rolling_windows: [5, 10, 20]        
-  volatility_periods: [10, 20]        
-  moving_averages: [10, 20, 30]       
-  lag_periods: [1, 5, 10]             
+  rolling_windows: [5, 10]           # Was [5,10,20] - removed 20
+  volatility_periods: [5, 10]        # Was [10,20] - changed to 5,10
+  moving_averages: [10, 20]          # Was [10,20,30] - removed 30
+  lag_periods: [1, 5]                # Was [1,5,10] - removed 10
   
 models:
   validation:
-
-    train_test_split: "2025-11-15"  
-    test_size: 0.2    
+    train_test_split: "2025-11-20"   # Adjusted for ~80 usable rows
+    test_size: 0.2
+    
   xgboost:
     n_estimators: 100
     max_depth: 3
     learning_rate: 0.1
     objective: "reg:squarederror"
-    eval_metric: "rmse"  
+    eval_metric: "rmse"
+    
   knn:
     n_neighbors: 5
-    metric: "euclidean" 
+    metric: "euclidean"
+    
   regression:
     alpha: [0.1, 1.0, 10.0]
 
@@ -82,3 +89,22 @@ logging:
   level: "INFO"
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
   file: "logs/market_insight.log"
+
+
+# ============================================================================
+# CHANGES FROM PREVIOUS VERSION:
+# ============================================================================
+# 1. rolling_windows: [5,10,20] → [5,10] (removed 20-day window)
+# 2. volatility_periods: [10,20] → [5,10] (reduced from 10-20 to 5-10)
+# 3. moving_averages: [10,20,30] → [10,20] (removed 30-day MA)
+# 4. lag_periods: [1,5,10] → [1,5] (removed 10-day lag)
+# 5. train_test_split: adjusted to 2025-11-20 for ~80 usable rows
+#
+# EXPECTED RESULT:
+# - Start with: 100 rows
+# - Max feature window: 20 days (MA_20)
+# - Rows lost to NaN: ~20
+# - Usable data: ~80 rows ✅
+# - Train: ~64 rows
+# - Test: ~16 rows
+# ============================================================================
