@@ -1,6 +1,7 @@
 """
 Feature Engineering Layer - Leakage-Safe Time Series Features
 Strictly past-only feature creation with explicit look-ahead prevention
+FIXED: Proper return structure for pipeline
 """
 
 import pandas as pd
@@ -27,7 +28,7 @@ class FeatureEngineer:
         self.lag_periods = config['features']['lag_periods']
     
     def create_features(self, cleaned_data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
-        """Create features for all symbols."""
+        """Create features for all symbols - RETURNS DICT OF DATAFRAMES."""
         featured_data = {}
         
         for symbol, df in cleaned_data.items():
@@ -66,13 +67,19 @@ class FeatureEngineer:
             
             featured_data[symbol] = df_features
         
-        # Create multi-symbol dataset for models that need cross-sectional data
+        # =====================================================================
+        # FIX: Create combined dataset but save separately
+        # Don't include it in the return - pipeline expects only symbol dict
+        # =====================================================================
         combined_features = self._create_combined_dataset(featured_data)
+        self.logger.info(f"by_symbol: {len(featured_data)} records after feature engineering")
+        self.logger.info(f"combined: {len(combined_features)} records after feature engineering")
         
-        return {
-            'by_symbol': featured_data,
-            'combined': combined_features
-        }
+        # =====================================================================
+        # FIX: Return ONLY the dict of DataFrames, not nested dict
+        # This is what the pipeline expects
+        # =====================================================================
+        return featured_data
     
     def _create_returns(self, df: pd.DataFrame) -> pd.DataFrame:
         """Create return-based features."""
@@ -289,5 +296,5 @@ class FeatureEngineer:
                               [f'price_vs_ma_{ma}d_pct' for ma in self.moving_averages] +
                               ['rolling_high_20d', 'rolling_low_20d', 'momentum_10d', 'roc_10d'],
             'lagged': [f'return_lag_{l}d' for l in self.lag_periods] +
-                     [f'volume_lag_{l}d' for l in self.lag_periods]
+                     [f'volume_lag_{l}d' for l in self.lag_period]
         }
