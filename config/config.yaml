@@ -7,7 +7,7 @@ project:
   description: "Local-first market analytics MVP for portfolio demonstration"
 
 data:
-  source: "sample"
+  source: "api"  # Switch: "sample" or "api"
   
   symbols:
     - "AAPL"
@@ -15,7 +15,7 @@ data:
     - "GOOGL"
   
   date_range:
-    start: "2025-01-01"
+    start: "2025-01-01"  # CHANGED: 1 year data
     end: "2026-01-29"
   
   sample:
@@ -28,7 +28,7 @@ data:
     provider: "alphavantage"
     base_url: "https://www.alphavantage.co/query"
     function: "TIME_SERIES_DAILY"
-    outputsize: "full"
+    outputsize: "compact"  # CHANGED: full for more data
     datatype: "json"
     rate_limit_seconds: 12
     max_retries: 3
@@ -42,7 +42,7 @@ features:
   
 models:
   validation:
-    train_test_split: "2025-09-01"
+    train_test_split: "2025-09-01"  # CHANGED: proper train/test split
     test_size: 0.2
   xgboost:
     n_estimators: 100
