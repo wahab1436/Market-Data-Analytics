@@ -1,6 +1,6 @@
 """
-Data Ingestion Layer - Unified Fetcher (API + Sample Data)
-Supports both Alpha Vantage API and local sample JSON files
+Data Ingestion Layer - API Fetcher with Caching
+Alpha Vantage API implementation with strict rate limiting
 """
 
 import os
@@ -16,42 +16,26 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 
 
 class DataFetcher:
-    """Fetches market data from API or local sample files with intelligent fallback."""
+    """Fetches market data from Alpha Vantage API with caching and rate limiting."""
     
     def __init__(self, config: Dict[str, Any], logger):
         """Initialize fetcher with configuration."""
         self.config = config
         self.logger = logger
-        
-        # Determine data source
-        self.source = config['data'].get('source', 'api').lower()
-        
-        # Common settings
+        self.api_key = self._get_api_key()
+        self.base_url = config['data']['api']['base_url']
+        self.rate_limit_seconds = config['data']['api']['rate_limit_seconds']
+        self.max_retries = config['data']['api']['max_retries']
+        self.cache_duration = timedelta(hours=config['data']['api']['cache_duration_hours'])
         self.raw_data_path = Path(config['paths']['raw_data'])
-        self.raw_data_path.mkdir(parents=True, exist_ok=True)
+        self.last_request_time = 0
         
-        # API-specific settings (only if using API)
-        if self.source == 'api':
-            self.api_key = self._get_api_key()
-            if self.api_key:
-                self.base_url = config['data']['api']['base_url']
-                self.rate_limit_seconds = config['data']['api']['rate_limit_seconds']
-                self.max_retries = config['data']['api']['max_retries']
-                self.cache_duration = timedelta(hours=config['data']['api']['cache_duration_hours'])
-                self.last_request_time = 0
-                self.logger.info("✓ Initialized with API data source")
-            else:
-                self.logger.warning("⚠ API key not found, falling back to sample data")
-                self.source = 'sample'
-        
-        if self.source == 'sample':
-            self.logger.info("✓ Initialized with SAMPLE data source")
-        
-    def _get_api_key(self) -> Optional[str]:
-        """Get API key from environment variable (optional for sample mode)."""
+    def _get_api_key(self) -> str:
+        """Get API key from environment variable."""
         api_key = os.getenv('ALPHA_VANTAGE_API_KEY')
         if not api_key:
-            self.logger.warning("ALPHA_VANTAGE_API_KEY not set")
+            self.logger.error("ALPHA_VANTAGE_API_KEY environment variable not set")
+            raise ValueError("API key not found in environment variables")
         return api_key
     
     def _respect_rate_limit(self):
@@ -79,27 +63,6 @@ class DataFetcher:
         file_age = datetime.now() - datetime.fromtimestamp(cache_file.stat().st_mtime)
         return file_age < self.cache_duration
     
-    # ==================== SAMPLE DATA METHODS ====================
-    
-    def _load_sample_data(self, symbol: str) -> Optional[Dict[str, Any]]:
-        """Load data from local sample JSON file."""
-        sample_file = self.raw_data_path / f"{symbol}_sample.json"
-        
-        if not sample_file.exists():
-            self.logger.error(f"✗ Sample file not found: {sample_file}")
-            return None
-        
-        try:
-            with open(sample_file, 'r') as f:
-                data = json.load(f)
-            self.logger.info(f"✓ Loaded sample data for {symbol}")
-            return data
-        except Exception as e:
-            self.logger.error(f"✗ Failed to load sample data for {symbol}: {e}")
-            return None
-    
-    # ==================== API METHODS ====================
-    
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10),
@@ -118,7 +81,7 @@ class DataFetcher:
             'apikey': self.api_key
         }
         
-        self.logger.info(f"Fetching data for {symbol} from Alpha Vantage API...")
+        self.logger.info(f"Fetching data for {symbol} from Alpha Vantage")
         
         try:
             response = requests.get(
@@ -137,7 +100,8 @@ class DataFetcher:
                     raise ValueError(f"API error: {data['Error Message']}")
                 
                 if 'Note' in data:
-                    self.logger.warning(f"API rate limit warning for {symbol}: {data['Note']}")
+                    self.logger.warning(f"API note for {symbol}: {data['Note']}")
+                    # This is usually a rate limit warning
                     time.sleep(60)  # Wait longer if rate limited
                 
                 return data
@@ -172,21 +136,13 @@ class DataFetcher:
         if self._is_cache_valid(cache_file):
             with open(cache_file, 'r') as f:
                 data = json.load(f)
-            self.logger.info(f"✓ Loaded cached API data for {symbol}")
+            self.logger.info(f"Loaded cached data for {symbol}")
             return data
         
         return None
     
-    # ==================== UNIFIED INTERFACE ====================
-    
     def fetch_symbol(self, symbol: str) -> Optional[Dict[str, Any]]:
-        """Fetch data for a single symbol (from sample or API)."""
-        
-        # SAMPLE MODE
-        if self.source == 'sample':
-            return self._load_sample_data(symbol)
-        
-        # API MODE
+        """Fetch data for a single symbol with caching."""
         # Try cache first
         cached_data = self._load_from_cache(symbol)
         if cached_data:
@@ -198,26 +154,22 @@ class DataFetcher:
             self._save_to_cache(symbol, data)
             return data
         except Exception as e:
-            self.logger.error(f"✗ Failed to fetch API data for {symbol}: {e}")
-            # Fallback to sample data if API fails
-            self.logger.info(f"Attempting to load sample data as fallback...")
-            return self._load_sample_data(symbol)
+            self.logger.error(f"Failed to fetch data for {symbol}: {e}")
+            return None
     
     def fetch_all_symbols(self) -> Dict[str, Optional[Dict[str, Any]]]:
         """Fetch data for all configured symbols."""
         symbols = self.config['data']['symbols']
         results = {}
         
-        self.logger.info(f"{'='*60}")
-        self.logger.info(f"Fetching data for {len(symbols)} symbols using {self.source.upper()} source")
-        self.logger.info(f"{'='*60}")
+        self.logger.info(f"Fetching data for {len(symbols)} symbols")
         
         for symbol in symbols:
             data = self.fetch_symbol(symbol)
             results[symbol] = data
             
-            # Rate limit only for API mode
-            if self.source == 'api' and symbol != symbols[-1]:
+            # Be extra careful with rate limits
+            if symbol != symbols[-1]:  # Don't wait after last symbol
                 time.sleep(1)
         
         # Check for failures
@@ -225,12 +177,12 @@ class DataFetcher:
         failed = [s for s, d in results.items() if d is None]
         
         if failed:
-            self.logger.warning(f"✗ Failed to fetch data for symbols: {failed}")
+            self.logger.warning(f"Failed to fetch data for symbols: {failed}")
         
         if not successful:
             raise ValueError("No data was successfully fetched")
         
-        self.logger.info(f"✓ Successfully fetched data for {len(successful)}/{len(symbols)} symbols")
+        self.logger.info(f"Successfully fetched data for {len(successful)} symbols")
         return results
     
     def validate_api_response(self, data: Dict[str, Any]) -> bool:
@@ -256,7 +208,3 @@ class DataFetcher:
             return False
         
         return True
-    
-    def get_source_type(self) -> str:
-        """Return current data source type."""
-        return self.source
