@@ -1,7 +1,6 @@
 """
 Feature Engineering Layer - Leakage-Safe Time Series Features
 Strictly past-only feature creation with explicit look-ahead prevention
-FIXED: Proper return structure for pipeline
 """
 
 import pandas as pd
@@ -27,8 +26,8 @@ class FeatureEngineer:
         self.moving_averages = config['features']['moving_averages']
         self.lag_periods = config['features']['lag_periods']
     
-    def create_features(self, cleaned_data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
-        """Create features for all symbols - RETURNS DICT OF DATAFRAMES."""
+    def create_features(self, cleaned_data: Dict[str, pd.DataFrame]) -> Dict[str, Any]:
+        """Create features for all symbols."""
         featured_data = {}
         
         for symbol, df in cleaned_data.items():
@@ -67,19 +66,16 @@ class FeatureEngineer:
             
             featured_data[symbol] = df_features
         
-        # =====================================================================
-        # FIX: Create combined dataset but save separately
-        # Don't include it in the return - pipeline expects only symbol dict
-        # =====================================================================
+        # Create multi-symbol dataset for models that need cross-sectional data
         combined_features = self._create_combined_dataset(featured_data)
-        self.logger.info(f"by_symbol: {len(featured_data)} records after feature engineering")
-        self.logger.info(f"combined: {len(combined_features)} records after feature engineering")
         
-        # =====================================================================
-        # FIX: Return ONLY the dict of DataFrames, not nested dict
-        # This is what the pipeline expects
-        # =====================================================================
-        return featured_data
+        self.logger.info(f"by_symbol: {len(featured_data)} symbols processed")
+        self.logger.info(f"combined: {len(combined_features)} total records")
+        
+        return {
+            'by_symbol': featured_data,
+            'combined': combined_features
+        }
     
     def _create_returns(self, df: pd.DataFrame) -> pd.DataFrame:
         """Create return-based features."""
@@ -283,6 +279,23 @@ class FeatureEngineer:
         
         return combined
     
+    def load_silver_data(self, symbol: str) -> Optional[pd.DataFrame]:
+        """Load cleaned data from silver layer."""
+        file_path = self.gold_data_path / f"{symbol}_featured.parquet"
+        
+        if not file_path.exists():
+            self.logger.warning(f"No featured data found for {symbol}")
+            return None
+        
+        try:
+            df = pd.read_parquet(file_path)
+            df['date'] = pd.to_datetime(df['date'])
+            df = df.set_index('date')
+            return df
+        except Exception as e:
+            self.logger.error(f"Error loading featured data for {symbol}: {e}")
+            return None
+    
     def get_feature_categories(self) -> Dict[str, List[str]]:
         """Get features grouped by category."""
         return {
@@ -296,5 +309,5 @@ class FeatureEngineer:
                               [f'price_vs_ma_{ma}d_pct' for ma in self.moving_averages] +
                               ['rolling_high_20d', 'rolling_low_20d', 'momentum_10d', 'roc_10d'],
             'lagged': [f'return_lag_{l}d' for l in self.lag_periods] +
-                     [f'volume_lag_{l}d' for l in self.lag_period]
+                     [f'volume_lag_{l}d' for l in self.lag_periods]
         }
