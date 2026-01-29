@@ -12,29 +12,29 @@ from datetime import datetime, timedelta
 # Create directories
 Path("data/raw").mkdir(parents=True, exist_ok=True)
 
-# Configuration
-start_date = datetime(2025, 12, 1)
+# Configuration - UPDATED FOR 1 YEAR DATA
+start_date = datetime(2025, 1, 1)   # CHANGED: 1 year data
 end_date = datetime(2026, 1, 29)
 dates = pd.date_range(start=start_date, end=end_date, freq='D')
 
 # Realistic base prices and characteristics for each symbol
 symbols_config = {
     "AAPL": {
-        "base_price": 258.0,
-        "drift": 0.0003,  # Slight upward trend
-        "volatility": 0.02,  # 2% daily volatility
+        "base_price": 180.0,
+        "drift": 0.0003,
+        "volatility": 0.02,
         "volume_mean": 50000000,
         "volume_std": 15000000
     },
     "MSFT": {
-        "base_price": 425.0,
+        "base_price": 380.0,
         "drift": 0.0002,
         "volatility": 0.018,
         "volume_mean": 25000000,
         "volume_std": 8000000
     },
     "GOOGL": {
-        "base_price": 175.0,
+        "base_price": 140.0,
         "drift": 0.0001,
         "volatility": 0.022,
         "volume_mean": 20000000,
@@ -131,7 +131,7 @@ for symbol, config in symbols_config.items():
             "1. Information": "Daily Prices (open, high, low, close) and Volumes",
             "2. Symbol": symbol,
             "3. Last Refreshed": end_date.strftime('%Y-%m-%d'),
-            "4. Output Size": "Compact",
+            "4. Output Size": "Full size",
             "5. Time Zone": "US/Eastern"
         },
         "Time Series (Daily)": time_series
