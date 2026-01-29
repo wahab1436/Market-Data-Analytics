@@ -12,7 +12,7 @@ data:
     - "MSFT"  # Microsoft Corporation
     - "GOOGL" # Alphabet Inc.
   date_range:
-    start: "2025-12-01"  # ← CHANGED: Extended to get 1+ year of data
+    start: "2025-09-01"  # Change from 2025-12-01 to 2025-09-01
     end: "2026-01-29"
   api:
     provider: "alphavantage"  # Options: alphavantage, finnhub, marketstack
