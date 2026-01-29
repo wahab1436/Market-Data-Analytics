@@ -7,7 +7,7 @@ project:
   description: "Local-first market analytics MVP for portfolio demonstration"
 
 data:
-  source: "sample"  # Switch: "sample" or "api"
+  source: "sample"
   
   symbols:
     - "AAPL"
@@ -15,8 +15,9 @@ data:
     - "GOOGL"
   
   date_range:
-    start_date = "2025-01-01"  
-    end_date = "2026-01-29"
+    start: "2025-01-01"
+    end: "2026-01-29"
+  
   sample:
     enabled: true
     auto_fallback: true
@@ -41,7 +42,7 @@ features:
   
 models:
   validation:
-    train_test_split: "2025-12-15"
+    train_test_split: "2025-09-01"
     test_size: 0.2
   xgboost:
     n_estimators: 100
