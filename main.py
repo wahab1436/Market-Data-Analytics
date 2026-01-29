@@ -3,6 +3,7 @@
 Market Insight Platform - Main Entry Point
 Local-First MVP | Batch-Driven Analytics
 Optimized for compact API output (100 days)
+FIXED: Proper handling of nested feature data structure
 """
 
 import argparse
@@ -149,9 +150,12 @@ class MarketInsightPlatform:
                 self.logger.error("Feature engineering failed. Check feature configuration.")
                 sys.exit(1)
             
+            # =====================================================================
+            # FIX: Access by_symbol from nested structure
+            # =====================================================================
             # Verify we have enough data for modeling
             data_summary = {}
-            for symbol, df in features_data.items():
+            for symbol, df in features_data['by_symbol'].items():
                 data_summary[symbol] = len(df)
                 self.logger.info(f"{symbol}: {len(df)} records after feature engineering")
             
@@ -239,7 +243,7 @@ class MarketInsightPlatform:
             self.logger.info("BATCH PIPELINE SUMMARY")
             self.logger.info("=" * 60)
             self.logger.info(f"API Mode: {api_mode}")
-            self.logger.info(f"Symbols processed: {len(features_data)}")
+            self.logger.info(f"Symbols processed: {len(data_summary)}")
             for symbol, count in data_summary.items():
                 self.logger.info(f"  - {symbol}: {count} records")
             self.logger.info(f"Analysis modules completed: {len([r for r in analysis_results.values() if r])}/4")
