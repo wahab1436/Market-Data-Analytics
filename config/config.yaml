@@ -1,5 +1,5 @@
 # Market Insight Platform Configuration
-# Local-First MVP | Batch-Driven Analytics
+# OPTIMIZED FOR FREE API + COMPACT MODE
 
 project:
   name: "Market Insight Platform"
@@ -7,16 +7,17 @@ project:
   description: "Local-first market analytics MVP for portfolio demonstration"
 
 data:
-  source: "api"  # Switch: "sample" or "api"
+  source: "api"  
   
   symbols:
     - "AAPL"
     - "MSFT"
     - "GOOGL"
   
+
   date_range:
-    start: "2025-01-01"  # CHANGED: 1 year data
-    end: "2026-01-29"
+    start: "2025-09-01" 
+    end: "2026-01-29"    
   
   sample:
     enabled: true
@@ -28,31 +29,32 @@ data:
     provider: "alphavantage"
     base_url: "https://www.alphavantage.co/query"
     function: "TIME_SERIES_DAILY"
-    outputsize: "compact"  # CHANGED: full for more data
+    outputsize: "compact"  
     datatype: "json"
-    rate_limit_seconds: 12
-    max_retries: 3
-    cache_duration_hours: 24
+    rate_limit_seconds: 15  
+    max_retries: 2  
+    cache_duration_hours: 168  
 
 features:
-  rolling_windows: [5, 10, 20, 30]
-  volatility_periods: [10, 20, 30]
-  moving_averages: [10, 20, 50]
-  lag_periods: [1, 5, 10]
+  rolling_windows: [5, 10, 20]        
+  volatility_periods: [10, 20]        
+  moving_averages: [10, 20, 30]       
+  lag_periods: [1, 5, 10]             
   
 models:
   validation:
-    train_test_split: "2025-09-01"  # CHANGED: proper train/test split
-    test_size: 0.2
+
+    train_test_split: "2025-11-15"  
+    test_size: 0.2    
   xgboost:
     n_estimators: 100
     max_depth: 3
     learning_rate: 0.1
     objective: "reg:squarederror"
-    eval_metric: "rmse"
+    eval_metric: "rmse"  
   knn:
     n_neighbors: 5
-    metric: "euclidean"
+    metric: "euclidean" 
   regression:
     alpha: [0.1, 1.0, 10.0]
 
