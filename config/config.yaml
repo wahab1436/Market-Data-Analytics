@@ -12,27 +12,27 @@ data:
     - "MSFT"  # Microsoft Corporation
     - "GOOGL" # Alphabet Inc.
   date_range:
-    start: "2025-09-01"  # Change from 2025-12-01 to 2025-09-01
+    start: "2025-12-01"
     end: "2026-01-29"
   api:
-    provider: "alphavantage"  # Options: alphavantage, finnhub, marketstack
+    provider: "alphavantage"
     base_url: "https://www.alphavantage.co/query"
     function: "TIME_SERIES_DAILY"
-    outputsize: "compact"  # ← CHANGED: From "compact" to "full" (gets up to 20 years)
+    outputsize: "compact"
     datatype: "json"
-    rate_limit_seconds: 12  # Free tier limit
+    rate_limit_seconds: 12
     max_retries: 3
     cache_duration_hours: 24
 
 features:
-  rolling_windows: [10, 20, 30, 50]
+  rolling_windows: [5, 10, 20, 30]
   volatility_periods: [10, 20, 30]
-  moving_averages: [20, 50, 200]  # Now we have enough data for 200-day MA
+  moving_averages: [10, 20, 50]
   lag_periods: [1, 5, 10]
   
 models:
   validation:
-    train_test_split: "2025-12-01"
+    train_test_split: "2025-12-15"
     test_size: 0.2
   xgboost:
     n_estimators: 100
@@ -44,7 +44,7 @@ models:
     n_neighbors: 5
     metric: "euclidean"
   regression:
-    alpha: [0.1, 1.0, 10.0]  # For Ridge/Lasso
+    alpha: [0.1, 1.0, 10.0]
 
 dashboard:
   update_frequency: "daily"
