@@ -7,14 +7,24 @@ project:
   description: "Local-first market analytics MVP for portfolio demonstration"
 
 data:
+  source: "sample"  # Switch: "sample" or "api"
+  
   symbols:
-    - "AAPL"  # Apple Inc.
-    - "MSFT"  # Microsoft Corporation
-    - "GOOGL" # Alphabet Inc.
+    - "AAPL"
+    - "MSFT"
+    - "GOOGL"
+  
   date_range:
     start: "2025-12-01"
     end: "2026-01-29"
+  
+  sample:
+    enabled: true
+    auto_fallback: true
+    path: "data/raw"
+  
   api:
+    enabled: true
     provider: "alphavantage"
     base_url: "https://www.alphavantage.co/query"
     function: "TIME_SERIES_DAILY"
