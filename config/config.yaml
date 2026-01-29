@@ -15,9 +15,8 @@ data:
     - "GOOGL"
   
   date_range:
-    start: "2025-12-01"
-    end: "2026-01-29"
-  
+    start_date = "2025-01-01"  
+    end_date = "2026-01-29"
   sample:
     enabled: true
     auto_fallback: true
