@@ -1,6 +1,6 @@
 """
-Data Cleaning & Validation Layer
-Transforms raw API responses into clean, validated time series
+Data Cleaning & Validation Layer - FIXED VERSION
+Handles API rate limit responses and validates data structure properly
 """
 
 import pandas as pd
@@ -26,15 +26,42 @@ class DataCleaner:
             self.logger.warning(f"No raw data for {symbol}")
             return None
         
-        # Validate API response
+        # =====================================================================
+        # FIX 1: Check for API rate limit or error messages FIRST
+        # =====================================================================
+        if 'Note' in raw_data:
+            self.logger.error(f"API rate limit hit for {symbol}: {raw_data['Note']}")
+            return None
+            
+        if 'Information' in raw_data:
+            self.logger.error(f"API limit reached for {symbol}: {raw_data['Information']}")
+            return None
+            
+        if 'Error Message' in raw_data:
+            self.logger.error(f"API error for {symbol}: {raw_data['Error Message']}")
+            return None
+        
+        # =====================================================================
+        # FIX 2: Validate API response structure with better error messages
+        # =====================================================================
         required_keys = ['Meta Data', 'Time Series (Daily)']
-        if not all(key in raw_data for key in required_keys):
-            self.logger.error(f"Invalid raw data structure for {symbol}")
+        missing_keys = [key for key in required_keys if key not in raw_data]
+        
+        if missing_keys:
+            available_keys = list(raw_data.keys())
+            self.logger.error(
+                f"Invalid raw data structure for {symbol}. "
+                f"Missing: {missing_keys}, Available: {available_keys}"
+            )
             return None
         
         try:
             # Extract time series data
             time_series = raw_data['Time Series (Daily)']
+            
+            if not time_series:
+                self.logger.error(f"Empty time series data for {symbol}")
+                return None
             
             # Convert to DataFrame
             df = pd.DataFrame.from_dict(time_series, orient='index')
@@ -90,11 +117,13 @@ class DataCleaner:
             # Save to silver layer
             self._save_silver_data(df, symbol)
             
-            self.logger.info(f"Processed {len(df)} records for {symbol}")
+            self.logger.info(f"✓ Processed {len(df)} records for {symbol}")
             return df
             
         except Exception as e:
             self.logger.error(f"Error processing {symbol}: {e}")
+            import traceback
+            self.logger.debug(f"Traceback: {traceback.format_exc()}")
             return None
     
     def _handle_missing_values(self, df: pd.DataFrame, symbol: str) -> pd.DataFrame:
@@ -243,7 +272,7 @@ class DataCleaner:
         if not processed_data:
             raise ValueError("No symbols were successfully processed")
         
-        self.logger.info(f"Successfully processed {len(processed_data)} symbols")
+        self.logger.info(f"✓ Successfully processed {len(processed_data)} symbols")
         return processed_data
     
     def combine_symbols(self, processed_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
