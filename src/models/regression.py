@@ -91,10 +91,10 @@ class RegressionModels:
             importance_results = self._analyze_feature_importance(models, feature_names, symbol)
             symbol_results.update(importance_results)
             
-            # Save models
+            # Save models (saved separately to keep results lightweight)
             self._save_models(models, symbol)
             
-            # Save symbol results to artifacts
+            # Save symbol results to artifacts using SHARED MERGE LOGIC
             self._save_symbol_results(symbol, symbol_results)
             
             results[symbol] = symbol_results
@@ -696,21 +696,6 @@ class RegressionModels:
         
         self.logger.debug(f"Saved regression models for {symbol}")
     
-    def _save_symbol_results(self, symbol: str, results: Dict[str, Any]) -> None:
-        """Save regression model results for a symbol to artifacts folder."""
-        try:
-            # Create artifacts directory if it doesn't exist
-            self.artifacts_path.mkdir(parents=True, exist_ok=True)
-            
-            # Save results to pickle file
-            output_file = self.artifacts_path / f"{symbol}_regression_models.pkl"
-            joblib.dump(results, output_file)
-            
-            self.logger.info(f"Saved regression model results for {symbol} to {output_file}")
-            
-        except Exception as e:
-            self.logger.error(f"Error saving regression model results for {symbol}: {e}")
-    
     def _analyze_cross_symbol_regression(self, results: Dict[str, Any]) -> Dict[str, Any]:
         """Analyze regression results across symbols."""
         cross_results = {}
@@ -821,3 +806,35 @@ class RegressionModels:
         cross_results['insights'] = insights
         
         return cross_results
+
+    def _save_symbol_results(self, symbol: str, results: Dict[str, Any]) -> None:
+        """
+        FIXED: Merges regression results into the shared analysis file using Load-Update-Save.
+        """
+        try:
+            self.artifacts_path.mkdir(parents=True, exist_ok=True)
+            output_file = self.artifacts_path / f"{symbol}_analysis_results.pkl"
+            
+            # 1. Prepare data (filter out heavy objects)
+            save_results = {k: v for k, v in results.items() 
+                           if k not in ['models', 'charts', 'fig', 'plots']}
+            
+            # 2. Load existing
+            final_data = {}
+            if output_file.exists():
+                try:
+                    final_data = joblib.load(output_file)
+                    if not isinstance(final_data, dict):
+                        final_data = {}
+                except:
+                    final_data = {}
+            
+            # 3. Update 'regression' key
+            final_data['regression'] = save_results
+            
+            # 4. Save back
+            joblib.dump(final_data, output_file)
+            self.logger.info(f"Merged regression results for {symbol} into {output_file}")
+            
+        except Exception as e:
+            self.logger.error(f"Error saving regression results for {symbol}: {str(e)}")

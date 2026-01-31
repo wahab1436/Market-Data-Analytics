@@ -23,6 +23,7 @@ class SimilarityAnalysis:
         self.config = config
         self.logger = logger
         self.color_palette = config['dashboard']['color_palette']
+        # Ensure path is converted to a Path object for proper handling
         self.artifacts_path = Path(config['paths']['artifacts'])
         
     def analyze(self, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -62,7 +63,7 @@ class SimilarityAnalysis:
             
             results[symbol] = symbol_results
             
-            # Save symbol results
+            # Save symbol results using the new merge logic
             self._save_symbol_results(symbol, symbol_results)
         
         # Cross-symbol similarity analysis
@@ -880,16 +881,36 @@ class SimilarityAnalysis:
         return results
     
     def _save_symbol_results(self, symbol: str, results: Dict[str, Any]) -> None:
-        """Save similarity analysis results for a symbol to artifacts folder."""
+        """
+        FIXED: Merges similarity analysis results into the shared pkl file.
+        Prevents overwriting data from other analysis modules.
+        """
         try:
-            # Create artifacts directory if it doesn't exist
+            # Ensure the directory exists
             self.artifacts_path.mkdir(parents=True, exist_ok=True)
             
-            # Save results to pickle file
-            output_file = self.artifacts_path / f"{symbol}_similarity_analysis.pkl"
-            joblib.dump(results, output_file)
+            # Use the SHARED results file instead of a module-specific one
+            output_file = self.artifacts_path / f"{symbol}_analysis_results.pkl"
             
-            self.logger.info(f"Saved similarity analysis results for {symbol} to {output_file}")
+            # 1. Prepare data for storage: remove charts (Plotly objects) to keep files small
+            save_results = {k: v for k, v in results.items() if k not in ['charts', 'fig', 'plots']}
+            
+            # 2. Load existing results if they exist to perform a merge
+            final_data = {}
+            if output_file.exists():
+                try:
+                    final_data = joblib.load(output_file)
+                    if not isinstance(final_data, dict):
+                        final_data = {}
+                except Exception:
+                    final_data = {}
+            
+            # 3. Add/Update ONLY the similarity analysis key
+            final_data['similarity'] = save_results
+            
+            # 4. Save the merged data back to the disk
+            joblib.dump(final_data, output_file)
+            self.logger.info(f"Merged similarity analysis for {symbol} into {output_file}")
             
         except Exception as e:
-            self.logger.error(f"Error saving similarity analysis results for {symbol}: {e}")
+            self.logger.error(f"Error merging similarity analysis for {symbol}: {e}")

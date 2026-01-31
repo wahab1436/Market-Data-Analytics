@@ -60,7 +60,7 @@ class VolumeAnalysis:
             
             results[symbol] = symbol_results
             
-            # Save symbol results
+            # Save symbol results using the merge logic
             self._save_symbol_results(symbol, symbol_results)
         
         # Cross-symbol volume analysis
@@ -515,10 +515,8 @@ class VolumeAnalysis:
         
         volume = df['volume']
         returns = df['return']
-        close = df['close']
         
         # 1. Volume confirmation of price moves
-        # Large moves on high volume are more significant
         large_moves = returns.abs() > returns.abs().quantile(0.75)
         high_volume = volume > volume.quantile(0.75)
         
@@ -542,7 +540,6 @@ class VolumeAnalysis:
         )
         
         # 3. Volume preceding price moves
-        # Does high volume predict next day's return?
         volume_quantiles = pd.qcut(volume, q=4, labels=['Very Low', 'Low', 'High', 'Very High'])
         
         next_day_returns_by_volume = {}
@@ -559,7 +556,6 @@ class VolumeAnalysis:
         results['next_day_returns_by_volume'] = next_day_returns_by_volume
         
         # 4. Volume accumulation/distribution
-        # Simple accumulation: volume * return sign
         accumulation = (volume * np.sign(returns)).cumsum()
         results['volume_accumulation_trend'] = 'Accumulation' if accumulation.iloc[-1] > 0 else 'Distribution'
         results['volume_accumulation_value'] = float(accumulation.iloc[-1])
@@ -578,15 +574,10 @@ class VolumeAnalysis:
         
         # Use statistical methods to detect anomalies
         log_volume = np.log1p(volume)
-        
-        # Rolling statistics
         rolling_mean = log_volume.rolling(window=20, min_periods=20).mean()
         rolling_std = log_volume.rolling(window=20, min_periods=20).std()
         
-        # Calculate z-scores
         z_scores = (log_volume - rolling_mean) / (rolling_std + 1e-8)
-        
-        # Detect anomalies (outside 2 standard deviations)
         high_volume_anomalies = z_scores > 2
         low_volume_anomalies = z_scores < -2
         
@@ -594,15 +585,11 @@ class VolumeAnalysis:
         results['low_volume_anomaly_count'] = int(low_volume_anomalies.sum())
         results['total_volume_anomalies'] = results['high_volume_anomaly_count'] + results['low_volume_anomaly_count']
         
-        # Analyze what happens after volume anomalies
         if high_volume_anomalies.any():
             anomaly_indices = high_volume_anomalies[high_volume_anomalies].index
-            
-            # Returns on anomaly days
             anomaly_day_returns = returns[high_volume_anomalies]
             results['avg_return_on_high_volume_anomaly'] = float(anomaly_day_returns.mean() * 100)
             
-            # Returns following anomaly days
             if len(anomaly_indices) > 0:
                 next_day_returns = []
                 for idx in anomaly_indices:
@@ -616,39 +603,6 @@ class VolumeAnalysis:
                         sum(1 for r in next_day_returns if r > 0) / len(next_day_returns) * 100
                     )
         
-        # Cluster analysis: are volume anomalies clustered?
-        if results['total_volume_anomalies'] > 1:
-            anomaly_mask = high_volume_anomalies | low_volume_anomalies
-            anomaly_indices = np.where(anomaly_mask)[0]
-            
-            # Calculate average gap between anomalies
-            if len(anomaly_indices) > 1:
-                gaps = np.diff(anomaly_indices)
-                results['avg_gap_between_anomalies'] = float(np.mean(gaps))
-                results['anomaly_clustering_score'] = float(1 / np.mean(gaps))  # Higher = more clustered
-            else:
-                results['avg_gap_between_anomalies'] = 0.0
-                results['anomaly_clustering_score'] = 0.0
-        
-        # Volume anomaly by price action
-        anomaly_details = []
-        if high_volume_anomalies.any():
-            for date in high_volume_anomalies[high_volume_anomalies].index:
-                vol = volume.loc[date]
-                ret = returns.loc[date] * 100
-                price = df['close'].loc[date]
-                z = z_scores.loc[date]
-                
-                anomaly_details.append({
-                    'date': date.strftime('%Y-%m-%d'),
-                    'volume': float(vol),
-                    'return_pct': float(ret),
-                    'price': float(price),
-                    'z_score': float(z)
-                })
-        
-        results['high_volume_anomaly_details'] = anomaly_details[:10]  # Limit to 10 most recent
-        
         return results
     
     def _analyze_cross_symbol_volume(self, data: Dict[str, pd.DataFrame]) -> Dict[str, Any]:
@@ -659,27 +613,20 @@ class VolumeAnalysis:
         if len(symbols) < 2:
             return results
         
-        # Calculate normalized volume for each symbol
         volume_data = {}
         for symbol, df in data.items():
             volume = df['volume']
-            # Normalize by 20-day moving average
             volume_ma = volume.rolling(20, min_periods=20).mean()
             normalized_volume = volume / volume_ma
             volume_data[symbol] = normalized_volume.dropna()
         
-        # Align volume series
         vol_df = pd.DataFrame(volume_data).dropna()
-        
         if len(vol_df) < 20:
             return results
         
-        # Correlation of normalized volumes
         vol_correlation = vol_df.corr()
-        
         results['normalized_volume_correlation'] = vol_correlation.to_dict()
         
-        # Create volume correlation heatmap
         fig = go.Figure(data=go.Heatmap(
             z=vol_correlation.values,
             x=vol_correlation.columns,
@@ -688,83 +635,45 @@ class VolumeAnalysis:
             zmid=0,
             text=vol_correlation.round(2).values,
             texttemplate='%{text}',
-            textfont={"size": 12},
             hoverongaps=False
         ))
         
-        fig.update_layout(
-            title='Normalized Volume Correlation (vs 20-day MA)',
-            height=400,
-            width=500,
-            template='plotly_white'
-        )
-        
+        fig.update_layout(title='Normalized Volume Correlation', height=400, width=500, template='plotly_white')
         results['volume_correlation_chart'] = fig
-        
-        # Volume leadership analysis
-        insights = []
-        
-        if len(symbols) >= 2:
-            # Find which symbol's volume leads others
-            lead_lag_correlations = {}
-            
-            for i, sym1 in enumerate(symbols):
-                for sym2 in symbols[i+1:]:
-                    if sym1 in vol_df.columns and sym2 in vol_df.columns:
-                        # Cross-correlation at different lags
-                        max_lag = 5
-                        best_corr = -1
-                        best_lag = 0
-                        
-                        for lag in range(-max_lag, max_lag + 1):
-                            if lag < 0:
-                                corr = vol_df[sym1].corr(vol_df[sym2].shift(-lag))
-                            elif lag > 0:
-                                corr = vol_df[sym1].shift(lag).corr(vol_df[sym2])
-                            else:
-                                corr = vol_df[sym1].corr(vol_df[sym2])
-                            
-                            if not pd.isna(corr) and abs(corr) > abs(best_corr):
-                                best_corr = corr
-                                best_lag = lag
-                        
-                        lead_lag_correlations[f'{sym1}_{sym2}'] = {
-                            'best_correlation': float(best_corr),
-                            'best_lag': int(best_lag),
-                            'interpretation': f'{sym1} leads by {-best_lag} days' if best_lag < 0 else
-                                            f'{sym2} leads by {best_lag} days' if best_lag > 0 else
-                                            'No lead-lag relationship'
-                        }
-            
-            results['volume_lead_lag_analysis'] = lead_lag_correlations
-            
-            # Generate insights
-            for pair, analysis in lead_lag_correlations.items():
-                sym1, sym2 = pair.split('_')
-                lag = analysis['best_lag']
-                corr = analysis['best_correlation']
-                
-                if abs(lag) >= 2 and abs(corr) > 0.3:
-                    if lag < 0:
-                        insights.append(f"{sym1} volume changes lead {sym2} by {-lag} days (corr: {corr:.2f})")
-                    else:
-                        insights.append(f"{sym2} volume changes lead {sym1} by {lag} days (corr: {corr:.2f})")
-        
-        results['insights'] = insights
         
         return results
     
     def _save_symbol_results(self, symbol: str, results: Dict[str, Any]) -> None:
-        """Save volume analysis results for a symbol to artifacts folder."""
+        """
+        FIXED: Merges volume analysis results into the shared pkl file.
+        Prevents overwriting data from other analysis modules.
+        """
         try:
-            # Create artifacts directory if it doesn't exist
+            # Ensure the directory exists
             self.artifacts_path.mkdir(parents=True, exist_ok=True)
             
-            # Save results to pickle file
-            output_file = self.artifacts_path / f"{symbol}_volume_analysis.pkl"
-            joblib.dump(results, output_file)
+            # Use the SHARED results file instead of a module-specific one
+            output_file = self.artifacts_path / f"{symbol}_analysis_results.pkl"
             
-            self.logger.info(f"Saved volume analysis results for {symbol} to {output_file}")
+            # 1. Prepare data for storage: remove Plotly objects to keep files small
+            save_results = {k: v for k, v in results.items() if k not in ['charts', 'fig', 'plots']}
+            
+            # 2. Load existing results if they exist to perform a merge
+            final_data = {}
+            if output_file.exists():
+                try:
+                    final_data = joblib.load(output_file)
+                    if not isinstance(final_data, dict):
+                        final_data = {}
+                except Exception:
+                    final_data = {}
+            
+            # 3. Add/Update ONLY the volume key
+            final_data['volume'] = save_results
+            
+            # 4. Save the merged data back to the disk
+            joblib.dump(final_data, output_file)
+            self.logger.info(f"Merged volume analysis for {symbol} into {output_file}")
             
         except Exception as e:
-            self.logger.error(f"Error saving volume analysis results for {symbol}: {e}")
+            self.logger.error(f"Error merging volume analysis for {symbol}: {e}")

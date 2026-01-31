@@ -21,6 +21,7 @@ class VolatilityAnalysis:
         self.config = config
         self.logger = logger
         self.color_palette = config['dashboard']['color_palette']
+        # Ensure path is converted to a Path object for proper handling
         self.artifacts_path = Path(config['paths']['artifacts'])
     
     def analyze(self, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -60,7 +61,7 @@ class VolatilityAnalysis:
             
             results[symbol] = symbol_results
             
-            # Save symbol results
+            # Save symbol results using the merge logic
             self._save_symbol_results(symbol, symbol_results)
         
         # Cross-symbol volatility analysis
@@ -434,8 +435,7 @@ class VolatilityAnalysis:
         
         returns = df['return'].dropna()
         
-        # Use Hidden Markov Model-like simple regime detection
-        # Simple threshold-based approach for MVP
+        # Simple threshold-based approach
         rolling_vol = returns.rolling(20).std().dropna() * np.sqrt(252) * 100
         
         if len(rolling_vol) == 0:
@@ -502,7 +502,6 @@ class VolatilityAnalysis:
                 end_indices = end_indices.insert(len(end_indices), mask.index[-1])
             
             if len(start_indices) != len(end_indices):
-                # Should not happen with proper handling
                 durations[f'avg_{name}_duration'] = 0.0
                 continue
             
@@ -565,7 +564,6 @@ class VolatilityAnalysis:
         if not extreme_mask.any():
             return 0.0
         
-        # Simple clustering measure: average gap between extreme events
         extreme_indices = np.where(extreme_mask)[0]
         
         if len(extreme_indices) < 2:
@@ -574,7 +572,6 @@ class VolatilityAnalysis:
         gaps = np.diff(extreme_indices)
         avg_gap = np.mean(gaps)
         
-        # Normalize by expected gap if events were random
         p_extreme = extreme_mask.mean()
         expected_gap = 1 / p_extreme if p_extreme > 0 else 0
         
@@ -594,7 +591,7 @@ class VolatilityAnalysis:
         if len(extreme_indices) < 5:
             return results
         
-        recovery_windows = [1, 3, 5, 10]  # Days after extreme move
+        recovery_windows = [1, 3, 5, 10]
         
         for window in recovery_windows:
             recovery_returns = []
@@ -619,25 +616,20 @@ class VolatilityAnalysis:
         if len(symbols) < 2:
             return results
         
-        # Calculate rolling volatility for each symbol
         vol_data = {}
         for symbol, df in data.items():
             returns = df['return'].dropna()
             rolling_vol = returns.rolling(20, min_periods=20).std() * np.sqrt(252) * 100
             vol_data[symbol] = rolling_vol.dropna()
         
-        # Align volatility series
         vol_df = pd.DataFrame(vol_data).dropna()
         
         if len(vol_df) < 20:
             return results
         
-        # Correlation of volatilities
         vol_correlation = vol_df.corr()
-        
         results['volatility_correlation_matrix'] = vol_correlation.to_dict()
         
-        # Create volatility correlation heatmap
         fig = go.Figure(data=go.Heatmap(
             z=vol_correlation.values,
             x=vol_correlation.columns,
@@ -659,22 +651,16 @@ class VolatilityAnalysis:
         
         results['volatility_correlation_chart'] = fig
         
-        # Volatility lead-lag analysis
         insights = []
-        
         if len(symbols) >= 2:
-            # Find which symbol's volatility leads others
             lead_lag_results = {}
             for i, sym1 in enumerate(symbols):
                 for sym2 in symbols[i+1:]:
                     if sym1 in vol_df.columns and sym2 in vol_df.columns:
-                        # Simple cross-correlation at lag 0, 1, -1
-                        corr_0 = vol_df[sym1].corr(vol_df[sym2])
                         corr_1 = vol_df[sym1].shift(1).corr(vol_df[sym2])
                         corr_minus1 = vol_df[sym1].corr(vol_df[sym2].shift(1))
                         
                         lead_lag_results[f'{sym1}_{sym2}'] = {
-                            'corr_0': float(corr_0),
                             'corr_1': float(corr_1),
                             'corr_minus1': float(corr_minus1),
                             'sym1_leads' if corr_1 > corr_minus1 else 'sym2_leads': 
@@ -683,29 +669,47 @@ class VolatilityAnalysis:
             
             results['volatility_lead_lag'] = lead_lag_results
             
-            # Generate insights
-            for pair, stats in lead_lag_results.items():
+            for pair, stats_ll in lead_lag_results.items():
                 sym1, sym2 = pair.split('_')
-                if stats['corr_1'] > stats['corr_minus1']:
-                    insights.append(f"{sym1} volatility leads {sym2} (cross-corr: {stats['corr_1']:.2f})")
+                if stats_ll['corr_1'] > stats_ll['corr_minus1']:
+                    insights.append(f"{sym1} volatility leads {sym2} (cross-corr: {stats_ll['corr_1']:.2f})")
                 else:
-                    insights.append(f"{sym2} volatility leads {sym1} (cross-corr: {stats['corr_minus1']:.2f})")
+                    insights.append(f"{sym2} volatility leads {sym1} (cross-corr: {stats_ll['corr_minus1']:.2f})")
         
         results['insights'] = insights
-        
         return results
     
     def _save_symbol_results(self, symbol: str, results: Dict[str, Any]) -> None:
-        """Save volatility analysis results for a symbol to artifacts folder."""
+        """
+        FIXED: Merges volatility analysis results into the shared pkl file.
+        Prevents overwriting data from other analysis modules.
+        """
         try:
-            # Create artifacts directory if it doesn't exist
+            # Ensure the directory exists
             self.artifacts_path.mkdir(parents=True, exist_ok=True)
             
-            # Save results to pickle file
-            output_file = self.artifacts_path / f"{symbol}_volatility_analysis.pkl"
-            joblib.dump(results, output_file)
+            # Use the SHARED results file instead of a module-specific one
+            output_file = self.artifacts_path / f"{symbol}_analysis_results.pkl"
             
-            self.logger.info(f"Saved volatility analysis results for {symbol} to {output_file}")
+            # 1. Prepare data for storage: remove Plotly objects to keep files small
+            save_results = {k: v for k, v in results.items() if k not in ['charts', 'fig', 'plots']}
+            
+            # 2. Load existing results if they exist to perform a merge
+            final_data = {}
+            if output_file.exists():
+                try:
+                    final_data = joblib.load(output_file)
+                    if not isinstance(final_data, dict):
+                        final_data = {}
+                except Exception:
+                    final_data = {}
+            
+            # 3. Add/Update ONLY the volatility key
+            final_data['volatility'] = save_results
+            
+            # 4. Save the merged data back to the disk
+            joblib.dump(final_data, output_file)
+            self.logger.info(f"Merged volatility analysis for {symbol} into {output_file}")
             
         except Exception as e:
-            self.logger.error(f"Error saving volatility analysis results for {symbol}: {e}")
+            self.logger.error(f"Error merging volatility analysis for {symbol}: {e}")

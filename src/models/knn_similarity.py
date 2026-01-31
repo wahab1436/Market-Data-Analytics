@@ -99,7 +99,7 @@ class KNNSimilarity:
             # Save models
             self._save_models(models, symbol)
             
-            # Save results to artifacts folder
+            # Save results to artifacts folder using SHARED MERGE LOGIC
             self._save_symbol_results(symbol, symbol_results)
             
             results[symbol] = symbol_results
@@ -496,9 +496,6 @@ class KNNSimilarity:
         # Best analog visualization
         if 'best_current_analog' in analogs:
             best_analog = analogs['best_current_analog']
-            
-            # Placeholder for pattern visualization
-            # In a real implementation, you would plot the actual price patterns
             
             fig.add_annotation(
                 x=0.5, y=0.7,
@@ -944,20 +941,39 @@ class KNNSimilarity:
         return cross_results
     
     def _save_symbol_results(self, symbol: str, results: Dict[str, Any]):
-        """Save analysis results to artifacts folder for dashboard."""
+        """
+        FIXED: Merges KNN results into the shared analysis file using Load-Update-Save.
+        """
         try:
-            # Remove model objects before saving (already saved separately)
-            save_results = results.copy()
+            self.artifacts_path.mkdir(parents=True, exist_ok=True)
+            output_file = self.artifacts_path / f"{symbol}_analysis_results.pkl"
             
-            # Remove sklearn model objects
-            if 'models' in save_results:
-                del save_results['models']
+            # 1. Prepare data (filter non-serializable Plotly charts/models if needed)
+            # Keeping models out of the results pickle to keep it light; models are saved separately in _save_models
+            save_results = {
+                'metrics': results.get('metrics', {}),
+                'predictions': results.get('predictions', {}),
+                'similarities': results.get('similarities', {}),
+                'analogs': results.get('analogs', {}),
+                'insights': results.get('insights', [])
+            }
             
-            # Save to artifacts folder
-            artifact_path = self.artifacts_path / f"{symbol}_knn_models.pkl"
-            joblib.dump(save_results, artifact_path)
+            # 2. Load existing
+            final_data = {}
+            if output_file.exists():
+                try:
+                    final_data = joblib.load(output_file)
+                    if not isinstance(final_data, dict):
+                        final_data = {}
+                except:
+                    final_data = {}
             
-            self.logger.info(f"Saved KNN results for {symbol} to {artifact_path}")
+            # 3. Update 'knn' key
+            final_data['knn'] = save_results
+            
+            # 4. Save back
+            joblib.dump(final_data, output_file)
+            self.logger.info(f"Merged KNN results for {symbol} into {output_file}")
             
         except Exception as e:
             self.logger.error(f"Error saving KNN results for {symbol}: {str(e)}")

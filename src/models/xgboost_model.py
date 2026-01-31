@@ -28,7 +28,7 @@ class XGBoostModel:
         self.models_path = Path(config['paths']['models'])
         self.models_path.mkdir(parents=True, exist_ok=True)
         
-        # ADD THIS LINE: Initialize artifacts path for saving results
+        # Initialize artifacts path for saving results
         self.artifacts_path = Path(config['paths']['artifacts'])
         self.artifacts_path.mkdir(parents=True, exist_ok=True)
         
@@ -121,8 +121,8 @@ class XGBoostModel:
             
             results[symbol] = symbol_results
             
-            # ADD THIS LINE: Save results to artifacts folder
-            self._save_symbol_results(symbol, symbol_results)
+            # FIXED: Save results to unified _analysis_results.pkl with proper merging
+            self._save_symbol_results_unified(symbol, symbol_results)
         
         # Cross-symbol XGBoost comparison
         if len(by_symbol) > 1:
@@ -197,8 +197,9 @@ class XGBoostModel:
         return X_scaled, y.values, available_features
     
     def _chronological_split(self, X: np.ndarray, y: np.ndarray, 
-                           dates: pd.DatetimeIndex) -> Tuple:
+                            dates: pd.DatetimeIndex) -> Tuple:
         """Split data chronologically for time-series validation."""
+        # Align dates with valid data
         split_idx = int(len(X) * (1 - self.test_size))
         
         X_train = X[:split_idx]
@@ -208,230 +209,156 @@ class XGBoostModel:
         train_dates = dates[:split_idx]
         test_dates = dates[split_idx:]
         
-        self.logger.info(f"XGBoost Train size: {len(X_train)}, Test size: {len(X_test)}")
-        
         return X_train, X_test, y_train, y_test, train_dates, test_dates
     
-    def _train_model(self, X_train: np.ndarray, y_train: np.ndarray,
-                    X_val: np.ndarray, y_val: np.ndarray, symbol: str) -> Tuple:
+    def _train_model(self, X_train: np.ndarray, y_train: np.ndarray, 
+                    X_test: np.ndarray, y_test: np.ndarray, 
+                    symbol: str) -> Tuple[xgb.Booster, Dict[str, float]]:
         """Train XGBoost model with early stopping."""
-        self.logger.info(f"Training XGBoost for {symbol} with {X_train.shape[1]} features")
-        
-        # Convert to DMatrix for XGBoost
+        # Create DMatrix
         dtrain = xgb.DMatrix(X_train, label=y_train)
-        dval = xgb.DMatrix(X_val, label=y_val)
+        dtest = xgb.DMatrix(X_test, label=y_test)
         
-        # Set up early stopping
-        early_stopping_rounds = 20
+        # Training parameters with early stopping
+        evals = [(dtrain, 'train'), (dtest, 'test')]
         
         # Train model
         model = xgb.train(
-            params=self.params,
-            dtrain=dtrain,
+            self.params,
+            dtrain,
             num_boost_round=self.params['n_estimators'],
-            evals=[(dtrain, 'train'), (dval, 'val')],
-            early_stopping_rounds=early_stopping_rounds,
+            evals=evals,
+            early_stopping_rounds=50,
             verbose_eval=False
         )
         
         # Get training metrics
         train_pred = model.predict(dtrain)
-        val_pred = model.predict(dval)
-        
         train_metrics = {
-            'train_rmse': float(np.sqrt(mean_squared_error(y_train, train_pred))),
-            'train_mae': float(mean_absolute_error(y_train, train_pred)),
-            'train_r2': float(r2_score(y_train, train_pred)),
-            'val_rmse': float(np.sqrt(mean_squared_error(y_val, val_pred))),
-            'val_mae': float(mean_absolute_error(y_val, val_pred)),
-            'val_r2': float(r2_score(y_val, val_pred)),
-            'best_iteration': model.best_iteration if hasattr(model, 'best_iteration') else self.params['n_estimators']
+            'train_rmse': np.sqrt(mean_squared_error(y_train, train_pred)),
+            'train_mae': mean_absolute_error(y_train, train_pred),
+            'train_r2': r2_score(y_train, train_pred)
         }
         
-        self.logger.info(f"XGBoost trained for {symbol}, best iteration: {train_metrics['best_iteration']}")
+        self.logger.info(
+            f"XGBoost training complete for {symbol}: "
+            f"R²={train_metrics['train_r2']:.3f}, "
+            f"RMSE={train_metrics['train_rmse']*100:.2f}%"
+        )
         
         return model, train_metrics
     
-    def _evaluate_model(self, model: xgb.Booster, X_test: np.ndarray,
-                       y_test: np.ndarray, symbol: str) -> Dict[str, Any]:
-        """Evaluate XGBoost model performance."""
-        evaluation = {}
-        
-        # Make predictions
+    def _evaluate_model(self, model: xgb.Booster, X_test: np.ndarray, 
+                       y_test: np.ndarray, symbol: str) -> Dict[str, float]:
+        """Evaluate model performance on test set."""
         dtest = xgb.DMatrix(X_test)
         y_pred = model.predict(dtest)
         
         # Calculate metrics
-        mse = mean_squared_error(y_test, y_pred)
-        rmse = np.sqrt(mse)
+        rmse = np.sqrt(mean_squared_error(y_test, y_pred))
         mae = mean_absolute_error(y_test, y_pred)
         r2 = r2_score(y_test, y_pred)
         
-        evaluation['test_mse'] = float(mse)
-        evaluation['test_rmse'] = float(rmse)
-        evaluation['test_mae'] = float(mae)
-        evaluation['test_r2'] = float(r2)
+        # Correlation
+        correlation = np.corrcoef(y_test, y_pred)[0, 1]
         
-        # Direction accuracy (for volatility prediction)
-        # We'll use correlation as a measure of directional accuracy
-        if len(y_test) > 1:
-            corr = np.corrcoef(y_test, y_pred)[0, 1]
-            evaluation['test_correlation'] = float(corr)
+        # Error analysis
+        errors = y_pred - y_test
+        error_mean = np.mean(errors)
+        error_std = np.std(errors)
         
-        # Error distribution metrics
-        errors = y_test - y_pred
-        evaluation['error_mean'] = float(np.mean(errors))
-        evaluation['error_std'] = float(np.std(errors))
-        evaluation['error_skew'] = float(pd.Series(errors).skew())
+        # Prediction intervals
+        within_1std = np.mean(np.abs(errors) <= error_std) * 100
+        within_2std = np.mean(np.abs(errors) <= 2 * error_std) * 100
         
-        # Percent within 1 standard deviation of actual
-        std_actual = np.std(y_test)
-        within_1std = (np.abs(errors) < std_actual).mean()
-        evaluation['within_1std_pct'] = float(within_1std * 100)
+        # Direction accuracy (for sign of return)
+        direction_accuracy = np.mean(np.sign(y_pred) == np.sign(y_test)) * 100
         
-        # Quantile analysis of errors
-        error_quantiles = np.percentile(np.abs(errors), [25, 50, 75, 90])
-        evaluation['error_q25'] = float(error_quantiles[0])
-        evaluation['error_median'] = float(error_quantiles[1])
-        evaluation['error_q75'] = float(error_quantiles[2])
-        evaluation['error_q90'] = float(error_quantiles[3])
-        
-        self.logger.info(f"XGBoost evaluation for {symbol}: RMSE={rmse*100:.2f}%, R²={r2:.3f}")
-        
-        return evaluation
-    
-    def _get_feature_importance(self, model: xgb.Booster, 
-                               feature_names: List[str], symbol: str) -> Dict[str, Any]:
-        """Get feature importance from XGBoost model."""
-        importance = {}
-        
-        # Get importance scores
-        importance_scores = model.get_score(importance_type='gain')
-        
-        if not importance_scores:
-            # Try weight importance
-            importance_scores = model.get_score(importance_type='weight')
-        
-        if importance_scores:
-            # Convert to list with feature names
-            importance_list = []
-            for i, feature in enumerate(feature_names):
-                # XGBoost uses f0, f1, f2... as feature names
-                feature_key = f'f{i}'
-                score = importance_scores.get(feature_key, 0)
-                importance_list.append({
-                    'feature': feature,
-                    'importance': float(score),
-                    'importance_normalized': 0  # Will be calculated below
-                })
-            
-            # Normalize importance scores
-            total_importance = sum(item['importance'] for item in importance_list)
-            if total_importance > 0:
-                for item in importance_list:
-                    item['importance_normalized'] = float(item['importance'] / total_importance * 100)
-            
-            # Sort by importance
-            importance_list.sort(key=lambda x: x['importance'], reverse=True)
-            
-            importance['by_gain'] = importance_list[:20]  # Top 20 features
-            
-            # Calculate importance by type
-            importance_by_type = self._categorize_feature_importance(importance_list)
-            importance['by_type'] = importance_by_type
-        else:
-            self.logger.warning(f"Could not extract feature importance for {symbol}")
-        
-        return importance
-    
-    def _categorize_feature_importance(self, importance_list: List[Dict]) -> Dict[str, float]:
-        """Categorize features by type for aggregated importance."""
-        categories = {
-            'returns_momentum': ['return', 'log_return', 'rolling_return', 'momentum', 'roc'],
-            'volatility': ['volatility', 'range', 'atr', 'zscore'],
-            'volume': ['volume', 'dollar_volume'],
-            'price_structure': ['ma_', 'price_vs_ma', 'rolling_high', 'rolling_low', 'price_position'],
-            'lagged': ['lag_', 'return_lag']
+        metrics = {
+            'test_rmse': rmse,
+            'test_mae': mae,
+            'test_r2': r2,
+            'test_correlation': correlation,
+            'error_mean': error_mean,
+            'error_std': error_std,
+            'within_1std_pct': within_1std,
+            'within_2std_pct': within_2std,
+            'direction_accuracy': direction_accuracy
         }
         
-        category_importance = {cat: 0.0 for cat in categories.keys()}
-        category_counts = {cat: 0 for cat in categories.keys()}
+        self.logger.info(
+            f"XGBoost evaluation for {symbol}: "
+            f"Test R²={r2:.3f}, RMSE={rmse*100:.2f}%, "
+            f"Correlation={correlation:.3f}"
+        )
+        
+        return metrics
+    
+    def _get_feature_importance(self, model: xgb.Booster, 
+                               feature_names: List[str], 
+                               symbol: str) -> Dict[str, Any]:
+        """Get feature importance from XGBoost model."""
+        # Get importance by gain (most informative)
+        importance_gain = model.get_score(importance_type='gain')
+        importance_weight = model.get_score(importance_type='weight')
+        importance_cover = model.get_score(importance_type='cover')
+        
+        # Convert to list of dicts
+        importance_list = []
+        for i, fname in enumerate(feature_names):
+            feature_key = f'f{i}'
+            if feature_key in importance_gain:
+                importance_list.append({
+                    'feature': fname,
+                    'gain': importance_gain.get(feature_key, 0),
+                    'weight': importance_weight.get(feature_key, 0),
+                    'cover': importance_cover.get(feature_key, 0)
+                })
+        
+        # Sort by gain
+        importance_list.sort(key=lambda x: x['gain'], reverse=True)
+        
+        # Normalize
+        total_gain = sum(item['gain'] for item in importance_list)
+        if total_gain > 0:
+            for item in importance_list:
+                item['gain_pct'] = (item['gain'] / total_gain) * 100
+        
+        # Group by feature type
+        feature_types = {
+            'returns': ['return', 'log_return', 'rolling_return', 'momentum', 'roc'],
+            'volatility': ['volatility', 'atr', 'range'],
+            'volume': ['volume', 'dollar_volume'],
+            'price_structure': ['ma', 'price_vs', 'rolling_high', 'rolling_low', 'position']
+        }
+        
+        importance_by_type = {ftype: 0 for ftype in feature_types}
         
         for item in importance_list:
-            feature = item['feature']
-            importance = item['importance_normalized']
-            
-            for cat, patterns in categories.items():
-                if any(pattern in feature for pattern in patterns):
-                    category_importance[cat] += importance
-                    category_counts[cat] += 1
+            fname = item['feature']
+            for ftype, keywords in feature_types.items():
+                if any(kw in fname.lower() for kw in keywords):
+                    importance_by_type[ftype] += item.get('gain_pct', 0)
+                    break
         
-        # Normalize category importance
-        total = sum(category_importance.values())
-        if total > 0:
-            for cat in category_importance:
-                category_importance[cat] = category_importance[cat] / total * 100
-        
-        return category_importance
+        return {
+            'by_gain': importance_list[:20],  # Top 20 features
+            'by_type': importance_by_type
+        }
     
-    def _make_predictions(self, model: xgb.Booster, X_test: np.ndarray,
-                         y_test: np.ndarray, test_dates: pd.DatetimeIndex,
+    def _make_predictions(self, model: xgb.Booster, X_test: np.ndarray, 
+                         y_test: np.ndarray, test_dates: pd.DatetimeIndex, 
                          symbol: str) -> Dict[str, Any]:
-        """Generate XGBoost predictions for visualization."""
-        predictions = {}
-        
-        # Make predictions
+        """Make predictions and organize results."""
         dtest = xgb.DMatrix(X_test)
         y_pred = model.predict(dtest)
         
-        # Create prediction DataFrame
-        pred_df = pd.DataFrame({
-            'date': test_dates,
+        predictions = {
+            'dates': test_dates,
             'actual': y_test,
             'predicted': y_pred,
-            'error': y_test - y_pred,
-            'abs_error': np.abs(y_test - y_pred),
-            'error_pct': (y_test - y_pred) / (y_test + 1e-8) * 100
-        })
-        
-        # Rolling performance metrics
-        window = min(20, len(pred_df))
-        if window > 0:
-            pred_df['rolling_mae'] = pred_df['abs_error'].rolling(window=window).mean()
-            pred_df['rolling_correlation'] = pred_df['actual'].rolling(window=window).corr(pred_df['predicted'])
-            pred_df['rolling_r2'] = 1 - (pred_df['abs_error'].rolling(window=window).var() / 
-                                        pred_df['actual'].rolling(window=window).var())
-        
-        predictions['data'] = pred_df.to_dict('records')
-        predictions['summary'] = {
-            'mean_actual': float(np.mean(y_test)),
-            'mean_predicted': float(np.mean(y_pred)),
-            'std_actual': float(np.std(y_test)),
-            'std_predicted': float(np.std(y_pred)),
-            'correlation': float(np.corrcoef(y_test, y_pred)[0, 1]) if len(y_test) > 1 else 0,
-            'bias': float(np.mean(y_test - y_pred)),  # Positive means underprediction
-            'mse': float(mean_squared_error(y_test, y_pred)),
-            'mae': float(mean_absolute_error(y_test, y_pred))
+            'errors': y_pred - y_test
         }
-        
-        # Identify best and worst predictions
-        if len(pred_df) > 0:
-            best_idx = pred_df['abs_error'].idxmin()
-            worst_idx = pred_df['abs_error'].idxmax()
-            
-            predictions['best_prediction'] = {
-                'date': pred_df.loc[best_idx, 'date'].strftime('%Y-%m-%d'),
-                'actual': float(pred_df.loc[best_idx, 'actual']),
-                'predicted': float(pred_df.loc[best_idx, 'predicted']),
-                'error': float(pred_df.loc[best_idx, 'error'])
-            }
-            
-            predictions['worst_prediction'] = {
-                'date': pred_df.loc[worst_idx, 'date'].strftime('%Y-%m-%d'),
-                'actual': float(pred_df.loc[worst_idx, 'actual']),
-                'predicted': float(pred_df.loc[worst_idx, 'predicted']),
-                'error': float(pred_df.loc[worst_idx, 'error'])
-            }
         
         return predictions
     
@@ -441,41 +368,32 @@ class XGBoostModel:
                               train_dates: pd.DatetimeIndex, test_dates: pd.DatetimeIndex,
                               importance: Dict[str, Any], symbol: str,
                               feature_names: List[str]) -> Dict[str, go.Figure]:
-        """Create XGBoost visualization charts."""
+        """Create comprehensive XGBoost visualization charts."""
         charts = {}
         
-        # 1. Actual vs Predicted with Error Analysis
-        fig = make_subplots(
-            rows=3, cols=1,
-            shared_xaxes=True,
-            vertical_spacing=0.08,
-            row_heights=[0.4, 0.3, 0.3],
-            subplot_titles=(
-                f'{symbol}: XGBoost Predictions vs Actual',
-                'Prediction Error Over Time',
-                'Error Distribution'
-            )
-        )
-        
-        # Make predictions
+        # 1. Predictions vs Actuals (Time Series)
         dtrain = xgb.DMatrix(X_train)
         dtest = xgb.DMatrix(X_test)
-        y_pred_train = model.predict(dtrain)
-        y_pred_test = model.predict(dtest)
+        train_pred = model.predict(dtrain)
+        test_pred = model.predict(dtest)
         
-        # Combine for plotting
-        all_dates = list(train_dates) + list(test_dates)
-        all_actual = np.concatenate([y_train, y_test])
-        all_predicted = np.concatenate([y_pred_train, y_pred_test])
+        fig = make_subplots(
+            rows=2, cols=1,
+            subplot_titles=(
+                f'{symbol} - XGBoost Predictions vs Actuals (Training Period)',
+                f'{symbol} - XGBoost Predictions vs Actuals (Test Period)'
+            ),
+            vertical_spacing=0.12
+        )
         
-        # Actual vs Predicted
+        # Training period
         fig.add_trace(
             go.Scatter(
-                x=all_dates,
-                y=all_actual * 100,
-                mode='lines',
+                x=train_dates,
+                y=y_train * 100,
                 name='Actual',
-                line=dict(color=self.color_palette['primary'], width=2),
+                line=dict(color=self.color_palette['text'], width=1),
+                opacity=0.7,
                 hovertemplate='Date: %{x}<br>Actual: %{y:.2f}%<extra></extra>'
             ),
             row=1, col=1
@@ -483,265 +401,254 @@ class XGBoostModel:
         
         fig.add_trace(
             go.Scatter(
-                x=all_dates,
-                y=all_predicted * 100,
-                mode='lines',
-                name='XGBoost Predicted',
-                line=dict(color=self.color_palette['success'], width=2, dash='dash'),
+                x=train_dates,
+                y=train_pred * 100,
+                name='Predicted',
+                line=dict(color=self.color_palette['primary'], width=2),
                 hovertemplate='Date: %{x}<br>Predicted: %{y:.2f}%<extra></extra>'
             ),
             row=1, col=1
         )
         
-        # Error over time
-        error_test = y_test - y_pred_test
+        # Test period
+        fig.add_trace(
+            go.Scatter(
+                x=test_dates,
+                y=y_test * 100,
+                name='Actual',
+                line=dict(color=self.color_palette['text'], width=1),
+                opacity=0.7,
+                showlegend=False,
+                hovertemplate='Date: %{x}<br>Actual: %{y:.2f}%<extra></extra>'
+            ),
+            row=2, col=1
+        )
         
         fig.add_trace(
             go.Scatter(
                 x=test_dates,
-                y=error_test * 100,
-                mode='lines+markers',
-                name='Prediction Error',
-                line=dict(color=self.color_palette['danger'], width=1.5),
-                marker=dict(size=4),
-                hovertemplate='Date: %{x}<br>Error: %{y:.2f}%<extra></extra>'
+                y=test_pred * 100,
+                name='Predicted',
+                line=dict(color=self.color_palette['warning'], width=2),
+                showlegend=False,
+                hovertemplate='Date: %{x}<br>Predicted: %{y:.2f}%<extra></extra>'
             ),
             row=2, col=1
-        )
-        
-        # Add zero line
-        fig.add_hline(
-            y=0,
-            line_width=1,
-            line_color=self.color_palette['text'],
-            row=2, col=1
-        )
-        
-        # Error distribution histogram
-        fig.add_trace(
-            go.Histogram(
-                x=error_test * 100,
-                nbinsx=30,
-                name='Error Distribution',
-                marker_color=self.color_palette['secondary'],
-                opacity=0.7,
-                hovertemplate='Error: %{x:.2f}%<br>Count: %{y}<extra></extra>'
-            ),
-            row=3, col=1
-        )
-        
-        # Add normal distribution overlay
-        if len(error_test) > 10:
-            mu, sigma = np.mean(error_test * 100), np.std(error_test * 100)
-            x_norm = np.linspace(mu - 4*sigma, mu + 4*sigma, 100)
-            y_norm = 1/(sigma * np.sqrt(2*np.pi)) * np.exp(-0.5*((x_norm - mu)/sigma)**2)
-            y_norm = y_norm * len(error_test) * (x_norm[1] - x_norm[0])  # Scale to histogram
-            
-            fig.add_trace(
-                go.Scatter(
-                    x=x_norm,
-                    y=y_norm,
-                    mode='lines',
-                    name='Normal Distribution',
-                    line=dict(color=self.color_palette['text'], width=2, dash='dash'),
-                    hovertemplate='Normal Distribution<extra></extra>'
-                ),
-                row=3, col=1
-            )
-        
-        fig.update_layout(
-            height=900,
-            showlegend=True,
-            hovermode='x unified',
-            template='plotly_white'
         )
         
         fig.update_xaxes(title_text="Date", row=2, col=1)
-        fig.update_xaxes(title_text="Prediction Error (%)", row=3, col=1)
-        fig.update_yaxes(title_text="Absolute Return (%)", row=1, col=1)
-        fig.update_yaxes(title_text="Error (%)", row=2, col=1)
-        fig.update_yaxes(title_text="Count", row=3, col=1)
+        fig.update_yaxes(title_text="Next-Day Volatility (%)", row=1, col=1)
+        fig.update_yaxes(title_text="Next-Day Volatility (%)", row=2, col=1)
         
-        charts['predictions_comprehensive'] = fig
+        fig.update_layout(
+            height=800,
+            showlegend=True,
+            template='plotly_white',
+            hovermode='x unified'
+        )
         
-        # 2. Feature Importance
-        if 'by_gain' in importance and importance['by_gain']:
-            fig2 = self._create_feature_importance_chart(importance['by_gain'], symbol)
-            charts['feature_importance'] = fig2
+        charts['predictions_timeseries'] = fig
         
-        # 3. Learning Curves
-        fig3 = self._create_learning_curves_chart(model, symbol)
-        charts['learning_curves'] = fig3
+        # 2. Scatter Plot: Predicted vs Actual
+        fig = go.Figure()
         
-        # 4. Prediction Scatter Plot
-        fig4 = go.Figure()
-        
-        fig4.add_trace(
+        # Test points
+        fig.add_trace(
             go.Scatter(
                 x=y_test * 100,
-                y=y_pred_test * 100,
+                y=test_pred * 100,
                 mode='markers',
-                name='Test Predictions',
+                name='Test Set',
                 marker=dict(
+                    color=self.color_palette['warning'],
                     size=8,
-                    color=np.abs(error_test * 100),
-                    colorscale='Viridis',
-                    showscale=True,
-                    colorbar=dict(title="Absolute Error (%)")
+                    opacity=0.6,
+                    line=dict(width=0.5, color='white')
                 ),
-                hovertemplate='Actual: %{x:.2f}%<br>Predicted: %{y:.2f}%<br>Error: %{marker.color:.2f}%<extra></extra>'
+                hovertemplate='Actual: %{x:.2f}%<br>Predicted: %{y:.2f}%<extra></extra>'
             )
         )
         
         # Perfect prediction line
-        min_val = min(y_test.min(), y_pred_test.min()) * 100
-        max_val = max(y_test.max(), y_pred_test.max()) * 100
+        min_val = min(y_test.min(), test_pred.min()) * 100
+        max_val = max(y_test.max(), test_pred.max()) * 100
         
-        fig4.add_trace(
+        fig.add_trace(
             go.Scatter(
                 x=[min_val, max_val],
                 y=[min_val, max_val],
                 mode='lines',
                 name='Perfect Prediction',
-                line=dict(color=self.color_palette['text'], width=1, dash='dash')
+                line=dict(color=self.color_palette['text'], dash='dash', width=2),
+                showlegend=True,
+                hoverinfo='skip'
             )
         )
         
-        fig4.update_layout(
-            title=f'{symbol}: XGBoost Prediction Scatter Plot',
-            xaxis_title='Actual Absolute Return (%)',
-            yaxis_title='Predicted Absolute Return (%)',
+        # Calculate R²
+        r2 = r2_score(y_test, test_pred)
+        
+        fig.update_layout(
+            title=f'{symbol} - XGBoost: Predicted vs Actual (R² = {r2:.3f})',
+            xaxis_title='Actual Next-Day Volatility (%)',
+            yaxis_title='Predicted Next-Day Volatility (%)',
+            height=600,
+            template='plotly_white',
+            showlegend=True
+        )
+        
+        charts['predicted_vs_actual'] = fig
+        
+        # 3. Feature Importance Chart
+        if 'by_gain' in importance and importance['by_gain']:
+            top_n = min(15, len(importance['by_gain']))
+            top_features = importance['by_gain'][:top_n]
+            
+            fig = go.Figure()
+            
+            features = [f['feature'] for f in top_features]
+            gains = [f.get('gain_pct', 0) for f in top_features]
+            
+            fig.add_trace(
+                go.Bar(
+                    y=features[::-1],  # Reverse for better readability
+                    x=gains[::-1],
+                    orientation='h',
+                    marker=dict(
+                        color=gains[::-1],
+                        colorscale='Viridis',
+                        showscale=True,
+                        colorbar=dict(title='Importance %')
+                    ),
+                    text=[f'{g:.1f}%' for g in gains[::-1]],
+                    textposition='auto',
+                    hovertemplate='%{y}<br>Importance: %{x:.1f}%<extra></extra>'
+                )
+            )
+            
+            fig.update_layout(
+                title=f'{symbol} - XGBoost Feature Importance (by Gain)',
+                xaxis_title='Importance (%)',
+                yaxis_title='Feature',
+                height=500,
+                template='plotly_white',
+                showlegend=False
+            )
+            
+            charts['feature_importance'] = fig
+        
+        # 4. Feature Type Importance (Pie Chart)
+        if 'by_type' in importance:
+            type_importance = importance['by_type']
+            
+            # Filter out zero importance
+            filtered_types = {k: v for k, v in type_importance.items() if v > 0}
+            
+            if filtered_types:
+                fig = go.Figure()
+                
+                fig.add_trace(
+                    go.Pie(
+                        labels=list(filtered_types.keys()),
+                        values=list(filtered_types.values()),
+                        hole=0.4,
+                        marker=dict(
+                            colors=[
+                                self.color_palette['primary'],
+                                self.color_palette['warning'],
+                                self.color_palette['success'],
+                                self.color_palette['danger']
+                            ]
+                        ),
+                        textinfo='label+percent',
+                        hovertemplate='%{label}<br>%{value:.1f}% importance<extra></extra>'
+                    )
+                )
+                
+                fig.update_layout(
+                    title=f'{symbol} - Feature Type Importance Distribution',
+                    height=500,
+                    template='plotly_white',
+                    showlegend=True
+                )
+                
+                charts['feature_type_importance'] = fig
+        
+        # 5. Residual Analysis
+        errors = test_pred - y_test
+        
+        fig = make_subplots(
+            rows=1, cols=2,
+            subplot_titles=('Residual Distribution', 'Residuals Over Time'),
+            specs=[[{'type': 'histogram'}, {'type': 'scatter'}]]
+        )
+        
+        # Histogram
+        fig.add_trace(
+            go.Histogram(
+                x=errors * 100,
+                nbinsx=30,
+                name='Residuals',
+                marker_color=self.color_palette['primary'],
+                opacity=0.7,
+                hovertemplate='Error: %{x:.2f}%<br>Count: %{y}<extra></extra>'
+            ),
+            row=1, col=1
+        )
+        
+        # Time series
+        fig.add_trace(
+            go.Scatter(
+                x=test_dates,
+                y=errors * 100,
+                mode='markers',
+                name='Residuals',
+                marker=dict(
+                    color=self.color_palette['warning'],
+                    size=6,
+                    opacity=0.6
+                ),
+                hovertemplate='Date: %{x}<br>Error: %{y:.2f}%<extra></extra>'
+            ),
+            row=1, col=2
+        )
+        
+        # Zero line
+        fig.add_hline(
+            y=0, line_dash="dash", line_color=self.color_palette['text'],
+            row=1, col=2
+        )
+        
+        fig.update_xaxes(title_text="Prediction Error (%)", row=1, col=1)
+        fig.update_xaxes(title_text="Date", row=1, col=2)
+        fig.update_yaxes(title_text="Frequency", row=1, col=1)
+        fig.update_yaxes(title_text="Prediction Error (%)", row=1, col=2)
+        
+        fig.update_layout(
+            title=f'{symbol} - XGBoost Residual Analysis',
             height=500,
-            showlegend=True,
+            showlegend=False,
             template='plotly_white'
         )
         
-        charts['prediction_scatter'] = fig4
+        charts['residual_analysis'] = fig
         
         return charts
     
-    def _create_feature_importance_chart(self, importance_list: List[Dict], 
-                                        symbol: str) -> go.Figure:
-        """Create feature importance chart."""
-        fig = go.Figure()
-        
-        # Extract data
-        features = [item['feature'] for item in importance_list[:15]]  # Top 15
-        importance_values = [item['importance_normalized'] for item in importance_list[:15]]
-        
-        # Color by importance
-        colors = [self.color_palette['primary']] * len(features)
-        if importance_values:
-            max_importance = max(importance_values)
-            for i, val in enumerate(importance_values):
-                if val == max_importance:
-                    colors[i] = self.color_palette['warning']
-        
-        fig.add_trace(
-            go.Bar(
-                x=importance_values,
-                y=features,
-                orientation='h',
-                marker_color=colors,
-                text=[f'{v:.1f}%' for v in importance_values],
-                textposition='auto',
-                hovertemplate='Feature: %{y}<br>Importance: %{x:.1f}%<extra></extra>'
-            )
-        )
-        
-        fig.update_layout(
-            title=f'{symbol}: XGBoost Feature Importance (Gain)',
-            height=500,
-            showlegend=False,
-            template='plotly_white',
-            xaxis_title='Importance (%)',
-            yaxis_title='Feature',
-            yaxis=dict(categoryorder='total ascending')
-        )
-        
-        return fig
-    
-    def _create_learning_curves_chart(self, model: xgb.Booster, symbol: str) -> go.Figure:
-        """Create learning curves chart from XGBoost."""
-        fig = go.Figure()
-        
-        # Try to get evaluation history
-        try:
-            # XGBoost stores evaluation results in evals_result()
-            evals_result = model.evals_result()
-            
-            if evals_result and 'train' in evals_result and 'val' in evals_result:
-                train_rmse = evals_result['train'][self.params['eval_metric']]
-                val_rmse = evals_result['val'][self.params['eval_metric']]
-                
-                iterations = list(range(1, len(train_rmse) + 1))
-                
-                fig.add_trace(
-                    go.Scatter(
-                        x=iterations,
-                        y=train_rmse,
-                        mode='lines',
-                        name='Training RMSE',
-                        line=dict(color=self.color_palette['primary'], width=2),
-                        hovertemplate='Iteration: %{x}<br>RMSE: %{y:.4f}<extra></extra>'
-                    )
-                )
-                
-                fig.add_trace(
-                    go.Scatter(
-                        x=iterations,
-                        y=val_rmse,
-                        mode='lines',
-                        name='Validation RMSE',
-                        line=dict(color=self.color_palette['success'], width=2),
-                        hovertemplate='Iteration: %{x}<br>RMSE: %{y:.4f}<extra></extra>'
-                    )
-                )
-                
-                # Add early stopping line if applicable
-                if hasattr(model, 'best_iteration') and model.best_iteration < len(iterations):
-                    fig.add_vline(
-                        x=model.best_iteration,
-                        line_width=2,
-                        line_dash="dash",
-                        line_color=self.color_palette['warning'],
-                        annotation_text=f"Best Iteration: {model.best_iteration}",
-                        annotation_position="top right"
-                    )
-        except:
-            # If evaluation history not available, create a simple placeholder
-            self.logger.warning(f"Could not extract learning curves for {symbol}")
-        
-        fig.update_layout(
-            title=f'{symbol}: XGBoost Learning Curves',
-            xaxis_title='Number of Boosting Rounds',
-            yaxis_title='RMSE',
-            height=400,
-            showlegend=True,
-            template='plotly_white'
-        )
-        
-        return fig
-    
     def _generate_xgboost_insights(self, model: xgb.Booster, 
-                                  evaluation: Dict[str, Any],
-                                  importance: Dict[str, Any], symbol: str) -> List[str]:
-        """Generate insights from XGBoost analysis."""
+                                  evaluation: Dict[str, float],
+                                  importance: Dict[str, Any],
+                                  symbol: str) -> List[str]:
+        """Generate actionable insights from XGBoost model."""
         insights = []
         
         # Model performance
-        rmse = evaluation.get('test_rmse', 0)
         r2 = evaluation.get('test_r2', 0)
+        rmse = evaluation.get('test_rmse', 0)
         corr = evaluation.get('test_correlation', 0)
         
-        insights.append(
-            f"XGBoost prediction RMSE: {rmse*100:.2f}%, "
-            f"R²: {r2:.3f}, Correlation: {corr:.3f}"
-        )
-        
-        # Performance interpretation
-        if r2 > 0.4:
-            insights.append("Strong predictive power for next-day volatility.")
+        if r2 > 0.5:
+            insights.append(f"Strong XGBoost model: R² = {r2:.3f}, explaining {r2*100:.1f}% of volatility variance.")
         elif r2 > 0.2:
             insights.append("Moderate predictive power for next-day volatility.")
         else:
@@ -913,14 +820,39 @@ class XGBoostModel:
         
         return cross_results
     
-    # ADD THIS METHOD: Save results to artifacts folder
-    def _save_symbol_results(self, symbol: str, results: Dict[str, Any]):
-        """Save analysis results to artifacts folder for dashboard."""
+    def _save_symbol_results_unified(self, symbol: str, results: Dict[str, Any]):
+        """
+        FIXED METHOD: Save results to unified _analysis_results.pkl with proper merging.
+        
+        This method:
+        1. Loads existing _analysis_results.pkl if it exists
+        2. Merges XGBoost results into the 'xgboost' key
+        3. Saves back to _analysis_results.pkl without overwriting other modules
+        """
         try:
-            # Remove model object and large data before saving
+            # Path to unified results file
+            unified_results_path = self.artifacts_path / "_analysis_results.pkl"
+            
+            # Load existing results or create new dict
+            if unified_results_path.exists():
+                try:
+                    existing_data = joblib.load(unified_results_path)
+                    self.logger.info(f"Loaded existing _analysis_results.pkl")
+                except Exception as e:
+                    self.logger.warning(f"Could not load existing results, creating new: {e}")
+                    existing_data = {}
+            else:
+                self.logger.info(f"Creating new _analysis_results.pkl")
+                existing_data = {}
+            
+            # Ensure 'xgboost' key exists in the unified structure
+            if 'xgboost' not in existing_data:
+                existing_data['xgboost'] = {}
+            
+            # Prepare XGBoost results for this symbol (remove unpicklable objects)
             save_results = results.copy()
             
-            # Remove model (already saved separately)
+            # Remove model object (already saved separately as .json)
             if 'model' in save_results:
                 del save_results['model']
             
@@ -928,11 +860,18 @@ class XGBoostModel:
             if 'explainability_data' in save_results:
                 del save_results['explainability_data']
             
-            # Save to artifacts folder
-            artifact_path = self.artifacts_path / f"{symbol}_xgboost_models.pkl"
-            joblib.dump(save_results, artifact_path)
+            # Merge this symbol's XGBoost results into the unified structure
+            existing_data['xgboost'][symbol] = save_results
             
-            self.logger.info(f"Saved XGBoost results for {symbol} to {artifact_path}")
+            # Save back to unified file
+            joblib.dump(existing_data, unified_results_path)
+            
+            self.logger.info(
+                f"Successfully merged XGBoost results for {symbol} into _analysis_results.pkl "
+                f"under key 'xgboost'"
+            )
             
         except Exception as e:
-            self.logger.error(f"Error saving XGBoost results for {symbol}: {str(e)}")
+            self.logger.error(f"Error saving unified XGBoost results for {symbol}: {str(e)}")
+            import traceback
+            self.logger.error(traceback.format_exc())
