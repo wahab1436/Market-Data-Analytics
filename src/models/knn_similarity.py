@@ -27,6 +27,8 @@ class KNNSimilarity:
         self.color_palette = config['dashboard']['color_palette']
         self.models_path = Path(config['paths']['models'])
         self.models_path.mkdir(parents=True, exist_ok=True)
+        self.artifacts_path = Path(config['paths']['artifacts'])
+        self.artifacts_path.mkdir(parents=True, exist_ok=True)
         
         # KNN parameters
         self.n_neighbors = config['models']['knn']['n_neighbors']
@@ -96,6 +98,9 @@ class KNNSimilarity:
             
             # Save models
             self._save_models(models, symbol)
+            
+            # Save results to artifacts folder
+            self._save_symbol_results(symbol, symbol_results)
             
             results[symbol] = symbol_results
         
@@ -937,3 +942,22 @@ class KNNSimilarity:
         cross_results['insights'] = insights
         
         return cross_results
+    
+    def _save_symbol_results(self, symbol: str, results: Dict[str, Any]):
+        """Save analysis results to artifacts folder for dashboard."""
+        try:
+            # Remove model objects before saving (already saved separately)
+            save_results = results.copy()
+            
+            # Remove sklearn model objects
+            if 'models' in save_results:
+                del save_results['models']
+            
+            # Save to artifacts folder
+            artifact_path = self.artifacts_path / f"{symbol}_knn_models.pkl"
+            joblib.dump(save_results, artifact_path)
+            
+            self.logger.info(f"Saved KNN results for {symbol} to {artifact_path}")
+            
+        except Exception as e:
+            self.logger.error(f"Error saving KNN results for {symbol}: {str(e)}")

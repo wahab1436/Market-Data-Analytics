@@ -28,6 +28,10 @@ class XGBoostModel:
         self.models_path = Path(config['paths']['models'])
         self.models_path.mkdir(parents=True, exist_ok=True)
         
+        # ADD THIS LINE: Initialize artifacts path for saving results
+        self.artifacts_path = Path(config['paths']['artifacts'])
+        self.artifacts_path.mkdir(parents=True, exist_ok=True)
+        
         # XGBoost parameters
         xgb_params = config['models']['xgboost']
         self.params = {
@@ -116,6 +120,9 @@ class XGBoostModel:
             }
             
             results[symbol] = symbol_results
+            
+            # ADD THIS LINE: Save results to artifacts folder
+            self._save_symbol_results(symbol, symbol_results)
         
         # Cross-symbol XGBoost comparison
         if len(by_symbol) > 1:
@@ -905,3 +912,27 @@ class XGBoostModel:
         cross_results['insights'] = insights
         
         return cross_results
+    
+    # ADD THIS METHOD: Save results to artifacts folder
+    def _save_symbol_results(self, symbol: str, results: Dict[str, Any]):
+        """Save analysis results to artifacts folder for dashboard."""
+        try:
+            # Remove model object and large data before saving
+            save_results = results.copy()
+            
+            # Remove model (already saved separately)
+            if 'model' in save_results:
+                del save_results['model']
+            
+            # Remove explainability data (already saved separately)
+            if 'explainability_data' in save_results:
+                del save_results['explainability_data']
+            
+            # Save to artifacts folder
+            artifact_path = self.artifacts_path / f"{symbol}_xgboost_models.pkl"
+            joblib.dump(save_results, artifact_path)
+            
+            self.logger.info(f"Saved XGBoost results for {symbol} to {artifact_path}")
+            
+        except Exception as e:
+            self.logger.error(f"Error saving XGBoost results for {symbol}: {str(e)}")

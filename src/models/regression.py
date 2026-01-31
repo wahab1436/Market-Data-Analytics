@@ -27,6 +27,8 @@ class RegressionModels:
         self.color_palette = config['dashboard']['color_palette']
         self.models_path = Path(config['paths']['models'])
         self.models_path.mkdir(parents=True, exist_ok=True)
+        self.artifacts_path = Path(config['paths']['artifacts'])
+        self.artifacts_path.mkdir(parents=True, exist_ok=True)
         
         # Model parameters
         self.alpha_values = config['models']['regression']['alpha']
@@ -91,6 +93,9 @@ class RegressionModels:
             
             # Save models
             self._save_models(models, symbol)
+            
+            # Save symbol results to artifacts
+            self._save_symbol_results(symbol, symbol_results)
             
             results[symbol] = symbol_results
         
@@ -690,6 +695,21 @@ class RegressionModels:
             joblib.dump(model_info['model'], model_path)
         
         self.logger.debug(f"Saved regression models for {symbol}")
+    
+    def _save_symbol_results(self, symbol: str, results: Dict[str, Any]) -> None:
+        """Save regression model results for a symbol to artifacts folder."""
+        try:
+            # Create artifacts directory if it doesn't exist
+            self.artifacts_path.mkdir(parents=True, exist_ok=True)
+            
+            # Save results to pickle file
+            output_file = self.artifacts_path / f"{symbol}_regression_models.pkl"
+            joblib.dump(results, output_file)
+            
+            self.logger.info(f"Saved regression model results for {symbol} to {output_file}")
+            
+        except Exception as e:
+            self.logger.error(f"Error saving regression model results for {symbol}: {e}")
     
     def _analyze_cross_symbol_regression(self, results: Dict[str, Any]) -> Dict[str, Any]:
         """Analyze regression results across symbols."""
