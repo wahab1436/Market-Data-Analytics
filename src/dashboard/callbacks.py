@@ -31,41 +31,20 @@ def register_callbacks(app, config: Dict[str, Any]):
         """Load precomputed data from disk with error handling."""
         try:
             if data_type == 'analysis':
-                # Load from unified file and extract this symbol's analysis data
-                file_path = Path(data_paths['artifacts']) / "_analysis_results.pkl"
-                if file_path.exists():
-                    data = joblib.load(file_path)
-                    # Extract analysis data for this symbol (price_analysis, volatility_analysis)
-                    symbol_data = {}
-                    for key in ['price_analysis', 'volatility_analysis']:
-                        if key in data and symbol in data[key]:
-                            # Use shortened key name for compatibility
-                            short_key = key.replace('_analysis', '')
-                            symbol_data[short_key] = data[key][symbol]
-                    return symbol_data if symbol_data else None
-                return None
-                
+                file_path = Path(data_paths['artifacts']) / f"{symbol}_analysis_results.pkl"
             elif data_type == 'models':
-                # Load from unified file and extract this symbol's model data
-                file_path = Path(data_paths['artifacts']) / "_analysis_results.pkl"
-                if file_path.exists():
-                    data = joblib.load(file_path)
-                    # Extract model data for this symbol (regression, knn, xgboost, explainability)
-                    symbol_data = {}
-                    for key in ['regression', 'knn', 'xgboost', 'explainability']:
-                        if key in data and symbol in data[key]:
-                            symbol_data[key] = data[key][symbol]
-                    return symbol_data if symbol_data else None
-                return None
-                
+                file_path = Path(data_paths['artifacts']) / f"{symbol}_model_results.pkl"
             elif data_type == 'features':
                 file_path = Path(data_paths['gold_data']) / f"{symbol}_featured.parquet"
-                if file_path.exists():
-                    return pd.read_parquet(file_path)
-                return None
             else:
                 return None
-                
+            
+            if file_path.exists():
+                if str(file_path).endswith('.pkl'):
+                    return joblib.load(file_path)
+                elif str(file_path).endswith('.parquet'):
+                    return pd.read_parquet(file_path)
+            return None
         except Exception as e:
             logger.error(f"Error loading {data_type} data for {symbol}: {e}")
             return None
