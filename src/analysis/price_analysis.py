@@ -6,8 +6,10 @@ Analyzes price trends, levels, and patterns
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Tuple, Any, Optional
+from pathlib import Path
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import joblib
 
 
 class PriceAnalysis:
@@ -17,6 +19,7 @@ class PriceAnalysis:
         """Initialize price analyzer."""
         self.config = config
         self.logger = logger
+        self.artifacts_path = Path(config['paths']['artifacts'])
     
     def analyze(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Perform comprehensive price analysis."""
@@ -50,6 +53,9 @@ class PriceAnalysis:
             symbol_results.update(trend_results)
             
             results[symbol] = symbol_results
+            
+            # Save individual symbol results
+            self._save_symbol_results(symbol, symbol_results)
         
         # Cross-symbol analysis
         if len(by_symbol) > 1:
@@ -57,6 +63,30 @@ class PriceAnalysis:
             results['cross_symbol'] = cross_results
         
         return results
+    
+    def _save_symbol_results(self, symbol: str, results: Dict[str, Any]):
+        """Save analysis results for a symbol to artifacts folder."""
+        try:
+            # Create a serializable copy (remove figures which can't be pickled easily)
+            serializable_results = {
+                'metrics': results.get('metrics', {}),
+                'insights': results.get('insights', []),
+                'golden_cross_count': results.get('golden_cross_count', 0),
+                'death_cross_count': results.get('death_cross_count', 0),
+                'current_trend': results.get('current_trend', 'Unknown'),
+                'support_level': results.get('support_level', 0),
+                'resistance_level': results.get('resistance_level', 0),
+                'current_vs_support': results.get('current_vs_support', 0),
+                'current_vs_resistance': results.get('current_vs_resistance', 0)
+            }
+            
+            # Save to pickle file
+            output_file = self.artifacts_path / f"{symbol}_analysis_results.pkl"
+            joblib.dump({'price': serializable_results}, output_file)
+            
+            self.logger.info(f"Saved price analysis results for {symbol} to {output_file}")
+        except Exception as e:
+            self.logger.error(f"Failed to save price analysis results for {symbol}: {e}")
     
     def _create_price_charts(self, df: pd.DataFrame, symbol: str) -> Dict[str, go.Figure]:
         """Create price visualization charts."""
@@ -177,13 +207,28 @@ class PriceAnalysis:
         
         # Basic metrics
         metrics['current_price'] = float(df['close'].iloc[-1])
-        metrics['price_change_1d'] = float(df['return'].iloc[-1] * 100)  # %
-        metrics['price_change_5d'] = float(((df['close'].iloc[-1] / df['close'].iloc[-5]) - 1) * 100)
-        metrics['price_change_30d'] = float(((df['close'].iloc[-1] / df['close'].iloc[-30]) - 1) * 100)
+        
+        # Handle edge cases for price changes
+        if len(df) >= 1:
+            metrics['price_change_1d'] = float(df['return'].iloc[-1] * 100) if 'return' in df.columns else 0.0
+        
+        if len(df) >= 5:
+            metrics['price_change_5d'] = float(((df['close'].iloc[-1] / df['close'].iloc[-5]) - 1) * 100)
+        else:
+            metrics['price_change_5d'] = 0.0
+            
+        if len(df) >= 30:
+            metrics['price_change_30d'] = float(((df['close'].iloc[-1] / df['close'].iloc[-30]) - 1) * 100)
+        else:
+            metrics['price_change_30d'] = 0.0
         
         # Volatility metrics
         metrics['annualized_volatility'] = float(df['return'].std() * np.sqrt(252) * 100)
-        metrics['sharpe_ratio'] = float(df['return'].mean() / df['return'].std() * np.sqrt(252))
+        
+        if df['return'].std() > 0:
+            metrics['sharpe_ratio'] = float(df['return'].mean() / df['return'].std() * np.sqrt(252))
+        else:
+            metrics['sharpe_ratio'] = 0.0
         
         # Risk metrics
         metrics['max_drawdown'] = self._calculate_max_drawdown(df['close'])
@@ -194,9 +239,17 @@ class PriceAnalysis:
         metrics['kurtosis'] = float(df['return'].kurtosis())
         
         # Price level metrics
-        if 'rolling_high_20d' in df.columns:
-            metrics['vs_20d_high'] = float(((df['close'].iloc[-1] / df['rolling_high_20d'].iloc[-1]) - 1) * 100)
-            metrics['vs_20d_low'] = float(((df['close'].iloc[-1] / df['rolling_low_20d'].iloc[-1]) - 1) * 100)
+        if 'rolling_high_20d' in df.columns and 'rolling_low_20d' in df.columns:
+            if df['rolling_high_20d'].iloc[-1] > 0:
+                metrics['vs_20d_high'] = float(((df['close'].iloc[-1] / df['rolling_high_20d'].iloc[-1]) - 1) * 100)
+            if df['rolling_low_20d'].iloc[-1] > 0:
+                metrics['vs_20d_low'] = float(((df['close'].iloc[-1] / df['rolling_low_20d'].iloc[-1]) - 1) * 100)
+        
+        # Volume metrics
+        if 'volume' in df.columns:
+            metrics['current_volume'] = float(df['volume'].iloc[-1])
+            if len(df) >= 20:
+                metrics['avg_volume_20d'] = float(df['volume'].tail(20).mean())
         
         return metrics
     
@@ -282,8 +335,8 @@ class PriceAnalysis:
             
             results['support_level'] = float(current_low)
             results['resistance_level'] = float(current_high)
-            results['current_vs_support'] = float(((current_close / current_low) - 1) * 100)
-            results['current_vs_resistance'] = float(((current_close / current_high) - 1) * 100)
+            results['current_vs_support'] = float(((current_close / current_low) - 1) * 100) if current_low > 0 else 0.0
+            results['current_vs_resistance'] = float(((current_close / current_high) - 1) * 100) if current_high > 0 else 0.0
         
         return results
     
@@ -315,7 +368,8 @@ class PriceAnalysis:
             text=correlation_matrix.round(2).values,
             texttemplate='%{text}',
             textfont={"size": 12},
-            hoverongaps=False
+            hoverongaps=False,
+            hovertemplate='%{y} vs %{x}<br>Correlation: %{z:.2f}<extra></extra>'
         ))
         
         fig.update_layout(

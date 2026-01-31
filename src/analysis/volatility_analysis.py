@@ -9,6 +9,8 @@ from typing import Dict, List, Tuple, Any, Optional
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from scipy import stats
+import joblib
+from pathlib import Path
 
 
 class VolatilityAnalysis:
@@ -19,6 +21,7 @@ class VolatilityAnalysis:
         self.config = config
         self.logger = logger
         self.color_palette = config['dashboard']['color_palette']
+        self.artifacts_path = Path(config['paths']['artifacts'])
     
     def analyze(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Perform comprehensive volatility analysis."""
@@ -56,6 +59,9 @@ class VolatilityAnalysis:
             symbol_results.update(extreme_results)
             
             results[symbol] = symbol_results
+            
+            # Save symbol results
+            self._save_symbol_results(symbol, symbol_results)
         
         # Cross-symbol volatility analysis
         if len(by_symbol) > 1:
@@ -347,7 +353,10 @@ class VolatilityAnalysis:
         metrics['volatility_percentile'] = float(stats.percentileofscore(rolling_vol, metrics['current_volatility_20d']))
         
         # Volatility ratios
-        metrics['volatility_ratio_current_vs_avg'] = float(metrics['current_volatility_20d'] / metrics['avg_volatility_20d'])
+        if metrics['avg_volatility_20d'] > 0:
+            metrics['volatility_ratio_current_vs_avg'] = float(metrics['current_volatility_20d'] / metrics['avg_volatility_20d'])
+        else:
+            metrics['volatility_ratio_current_vs_avg'] = 1.0
         
         # Extreme volatility metrics
         metrics['days_above_2std'] = int((returns.abs() > (2 * returns.std())).sum())
@@ -363,8 +372,8 @@ class VolatilityAnalysis:
         # Volatility persistence (autocorrelation)
         autocorr_1 = returns.autocorr(lag=1)
         autocorr_5 = returns.autocorr(lag=5)
-        metrics['volatility_persistence_1d'] = float(autocorr_1)
-        metrics['volatility_persistence_5d'] = float(autocorr_5)
+        metrics['volatility_persistence_1d'] = float(autocorr_1) if not pd.isna(autocorr_1) else 0.0
+        metrics['volatility_persistence_5d'] = float(autocorr_5) if not pd.isna(autocorr_5) else 0.0
         
         return metrics
     
@@ -449,9 +458,9 @@ class VolatilityAnalysis:
         
         # Average returns by regime
         regime_returns = {
-            'high': returns[high_vol_mask.index[high_vol_mask]].mean() if high_vol_mask.any() else 0,
-            'low': returns[low_vol_mask.index[low_vol_mask]].mean() if low_vol_mask.any() else 0,
-            'normal': returns[normal_vol_mask.index[normal_vol_mask]].mean() if normal_vol_mask.any() else 0
+            'high': float(returns[high_vol_mask.index[high_vol_mask]].mean()) if high_vol_mask.any() else 0.0,
+            'low': float(returns[low_vol_mask.index[low_vol_mask]].mean()) if low_vol_mask.any() else 0.0,
+            'normal': float(returns[normal_vol_mask.index[normal_vol_mask]].mean()) if normal_vol_mask.any() else 0.0
         }
         results['avg_return_by_regime'] = regime_returns
         
@@ -665,11 +674,11 @@ class VolatilityAnalysis:
                         corr_minus1 = vol_df[sym1].corr(vol_df[sym2].shift(1))
                         
                         lead_lag_results[f'{sym1}_{sym2}'] = {
-                            'corr_0': corr_0,
-                            'corr_1': corr_1,
-                            'corr_minus1': corr_minus1,
+                            'corr_0': float(corr_0),
+                            'corr_1': float(corr_1),
+                            'corr_minus1': float(corr_minus1),
                             'sym1_leads' if corr_1 > corr_minus1 else 'sym2_leads': 
-                                max(corr_1, corr_minus1)
+                                float(max(corr_1, corr_minus1))
                         }
             
             results['volatility_lead_lag'] = lead_lag_results
@@ -685,3 +694,18 @@ class VolatilityAnalysis:
         results['insights'] = insights
         
         return results
+    
+    def _save_symbol_results(self, symbol: str, results: Dict[str, Any]) -> None:
+        """Save volatility analysis results for a symbol to artifacts folder."""
+        try:
+            # Create artifacts directory if it doesn't exist
+            self.artifacts_path.mkdir(parents=True, exist_ok=True)
+            
+            # Save results to pickle file
+            output_file = self.artifacts_path / f"{symbol}_volatility_analysis.pkl"
+            joblib.dump(results, output_file)
+            
+            self.logger.info(f"Saved volatility analysis results for {symbol} to {output_file}")
+            
+        except Exception as e:
+            self.logger.error(f"Error saving volatility analysis results for {symbol}: {e}")

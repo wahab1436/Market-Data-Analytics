@@ -9,6 +9,8 @@ from typing import Dict, List, Tuple, Any, Optional
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from scipy import stats
+import joblib
+from pathlib import Path
 
 
 class VolumeAnalysis:
@@ -19,6 +21,7 @@ class VolumeAnalysis:
         self.config = config
         self.logger = logger
         self.color_palette = config['dashboard']['color_palette']
+        self.artifacts_path = Path(config['paths']['artifacts'])
     
     def analyze(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Perform comprehensive volume analysis."""
@@ -56,6 +59,9 @@ class VolumeAnalysis:
             symbol_results.update(anomaly_results)
             
             results[symbol] = symbol_results
+            
+            # Save symbol results
+            self._save_symbol_results(symbol, symbol_results)
         
         # Cross-symbol volume analysis
         if len(by_symbol) > 1:
@@ -386,8 +392,15 @@ class VolumeAnalysis:
         metrics['volume_std_20d'] = float(volume.tail(20).std())
         
         # Volume ratios
-        metrics['volume_ratio_current_vs_avg'] = float(metrics['current_volume'] / metrics['avg_volume_20d'])
-        metrics['volume_variability'] = float(metrics['volume_std_20d'] / metrics['avg_volume_20d'])
+        if metrics['avg_volume_20d'] > 0:
+            metrics['volume_ratio_current_vs_avg'] = float(metrics['current_volume'] / metrics['avg_volume_20d'])
+        else:
+            metrics['volume_ratio_current_vs_avg'] = 1.0
+            
+        if metrics['avg_volume_20d'] > 0:
+            metrics['volume_variability'] = float(metrics['volume_std_20d'] / metrics['avg_volume_20d'])
+        else:
+            metrics['volume_variability'] = 0.0
         
         # Dollar volume metrics
         if 'dollar_volume' in df.columns:
@@ -397,26 +410,26 @@ class VolumeAnalysis:
         
         # Volume-return relationships
         if 'volume_return_corr_20d' in df.columns:
-            metrics['current_volume_return_corr'] = float(df['volume_return_corr_20d'].iloc[-1])
+            corr_val = df['volume_return_corr_20d'].iloc[-1]
+            metrics['current_volume_return_corr'] = float(corr_val) if not pd.isna(corr_val) else 0.0
         
         # Calculate overall volume-return correlation
         valid_data = returns.notna() & volume.notna()
         if valid_data.sum() > 10:
-            metrics['overall_volume_return_corr'] = float(returns[valid_data].corr(volume[valid_data]))
+            corr = returns[valid_data].corr(volume[valid_data])
+            metrics['overall_volume_return_corr'] = float(corr) if not pd.isna(corr) else 0.0
             
             # Correlation on up vs down days
             up_days = returns[valid_data] > 0
             down_days = returns[valid_data] < 0
             
             if up_days.sum() > 5:
-                metrics['volume_return_corr_up_days'] = float(
-                    returns[valid_data][up_days].corr(volume[valid_data][up_days])
-                )
+                corr_up = returns[valid_data][up_days].corr(volume[valid_data][up_days])
+                metrics['volume_return_corr_up_days'] = float(corr_up) if not pd.isna(corr_up) else 0.0
             
             if down_days.sum() > 5:
-                metrics['volume_return_corr_down_days'] = float(
-                    returns[valid_data][down_days].corr(volume[valid_data][down_days])
-                )
+                corr_down = returns[valid_data][down_days].corr(volume[valid_data][down_days])
+                metrics['volume_return_corr_down_days'] = float(corr_down) if not pd.isna(corr_down) else 0.0
         
         # Volume distribution metrics
         log_volume = np.log1p(volume)
@@ -522,8 +535,8 @@ class VolumeAnalysis:
         up_days = returns > 0
         down_days = returns < 0
         
-        results['avg_volume_up_days'] = float(volume[up_days].mean()) if up_days.any() else 0
-        results['avg_volume_down_days'] = float(volume[down_days].mean()) if down_days.any() else 0
+        results['avg_volume_up_days'] = float(volume[up_days].mean()) if up_days.any() else 0.0
+        results['avg_volume_down_days'] = float(volume[down_days].mean()) if down_days.any() else 0.0
         results['volume_up_down_ratio'] = float(
             results['avg_volume_up_days'] / (results['avg_volume_down_days'] + 1e-8)
         )
@@ -593,8 +606,9 @@ class VolumeAnalysis:
             if len(anomaly_indices) > 0:
                 next_day_returns = []
                 for idx in anomaly_indices:
-                    if idx + 1 < len(returns):
-                        next_day_returns.append(returns.iloc[idx + 1])
+                    idx_pos = df.index.get_loc(idx)
+                    if idx_pos + 1 < len(returns):
+                        next_day_returns.append(returns.iloc[idx_pos + 1])
                 
                 if next_day_returns:
                     results['avg_next_day_return_after_high_volume'] = float(np.mean(next_day_returns) * 100)
@@ -710,13 +724,13 @@ class VolumeAnalysis:
                             else:
                                 corr = vol_df[sym1].corr(vol_df[sym2])
                             
-                            if abs(corr) > abs(best_corr):
+                            if not pd.isna(corr) and abs(corr) > abs(best_corr):
                                 best_corr = corr
                                 best_lag = lag
                         
                         lead_lag_correlations[f'{sym1}_{sym2}'] = {
-                            'best_correlation': best_corr,
-                            'best_lag': best_lag,
+                            'best_correlation': float(best_corr),
+                            'best_lag': int(best_lag),
                             'interpretation': f'{sym1} leads by {-best_lag} days' if best_lag < 0 else
                                             f'{sym2} leads by {best_lag} days' if best_lag > 0 else
                                             'No lead-lag relationship'
@@ -739,3 +753,18 @@ class VolumeAnalysis:
         results['insights'] = insights
         
         return results
+    
+    def _save_symbol_results(self, symbol: str, results: Dict[str, Any]) -> None:
+        """Save volume analysis results for a symbol to artifacts folder."""
+        try:
+            # Create artifacts directory if it doesn't exist
+            self.artifacts_path.mkdir(parents=True, exist_ok=True)
+            
+            # Save results to pickle file
+            output_file = self.artifacts_path / f"{symbol}_volume_analysis.pkl"
+            joblib.dump(results, output_file)
+            
+            self.logger.info(f"Saved volume analysis results for {symbol} to {output_file}")
+            
+        except Exception as e:
+            self.logger.error(f"Error saving volume analysis results for {symbol}: {e}")

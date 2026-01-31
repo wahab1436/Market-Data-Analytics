@@ -11,6 +11,8 @@ from plotly.subplots import make_subplots
 from scipy.spatial.distance import cdist
 from scipy import stats
 from sklearn.preprocessing import StandardScaler
+import joblib
+from pathlib import Path
 
 
 class SimilarityAnalysis:
@@ -21,6 +23,7 @@ class SimilarityAnalysis:
         self.config = config
         self.logger = logger
         self.color_palette = config['dashboard']['color_palette']
+        self.artifacts_path = Path(config['paths']['artifacts'])
         
     def analyze(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Perform comprehensive similarity analysis."""
@@ -58,6 +61,9 @@ class SimilarityAnalysis:
             symbol_results.update(pattern_results)
             
             results[symbol] = symbol_results
+            
+            # Save symbol results
+            self._save_symbol_results(symbol, symbol_results)
         
         # Cross-symbol similarity analysis
         if len(by_symbol) > 1:
@@ -872,3 +878,18 @@ class SimilarityAnalysis:
         results['insights'] = insights
         
         return results
+    
+    def _save_symbol_results(self, symbol: str, results: Dict[str, Any]) -> None:
+        """Save similarity analysis results for a symbol to artifacts folder."""
+        try:
+            # Create artifacts directory if it doesn't exist
+            self.artifacts_path.mkdir(parents=True, exist_ok=True)
+            
+            # Save results to pickle file
+            output_file = self.artifacts_path / f"{symbol}_similarity_analysis.pkl"
+            joblib.dump(results, output_file)
+            
+            self.logger.info(f"Saved similarity analysis results for {symbol} to {output_file}")
+            
+        except Exception as e:
+            self.logger.error(f"Error saving similarity analysis results for {symbol}: {e}")
