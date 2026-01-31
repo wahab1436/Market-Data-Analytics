@@ -809,11 +809,12 @@ class RegressionModels:
 
     def _save_symbol_results(self, symbol: str, results: Dict[str, Any]) -> None:
         """
-        FIXED: Merges regression results into the shared analysis file using Load-Update-Save.
+        FIXED: Merges regression results into the unified _analysis_results.pkl file.
+        Uses Load-Update-Save pattern to preserve data from other modules.
         """
         try:
             self.artifacts_path.mkdir(parents=True, exist_ok=True)
-            output_file = self.artifacts_path / f"{symbol}_analysis_results.pkl"
+            output_file = self.artifacts_path / "_analysis_results.pkl"
             
             # 1. Prepare data (filter out heavy objects)
             save_results = {k: v for k, v in results.items() 
@@ -826,13 +827,18 @@ class RegressionModels:
                     final_data = joblib.load(output_file)
                     if not isinstance(final_data, dict):
                         final_data = {}
-                except:
+                except Exception as e:
+                    self.logger.warning(f"Could not load existing results: {e}")
                     final_data = {}
             
-            # 3. Update 'regression' key
-            final_data['regression'] = save_results
+            # 3. Ensure 'regression' key exists in unified structure
+            if 'regression' not in final_data:
+                final_data['regression'] = {}
             
-            # 4. Save back
+            # 4. Update this symbol's regression data (nested under regression key)
+            final_data['regression'][symbol] = save_results
+            
+            # 5. Save back to unified file
             joblib.dump(final_data, output_file)
             self.logger.info(f"Merged regression results for {symbol} into {output_file}")
             

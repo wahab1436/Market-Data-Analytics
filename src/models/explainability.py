@@ -492,23 +492,29 @@ class ModelExplainability:
                          feature_names: List[str], sample_indices: np.ndarray,
                          symbol: str):
         """
-        FIXED: Saves SHAP data to the SHARED analysis results file using merge logic.
+        FIXED: Saves SHAP data to the unified _analysis_results.pkl file.
+        Uses Load-Update-Save pattern to preserve data from other modules.
         """
         try:
             self.artifacts_path.mkdir(parents=True, exist_ok=True)
-            output_file = self.artifacts_path / f"{symbol}_analysis_results.pkl"
+            output_file = self.artifacts_path / "_analysis_results.pkl"
             
             # Load existing
             if output_file.exists():
                 try:
                     combined_data = joblib.load(output_file)
-                except:
+                except Exception as e:
+                    self.logger.warning(f"Could not load existing results: {e}")
                     combined_data = {}
             else:
                 combined_data = {}
             
-            # Update 'shap' key
-            combined_data['explainability'] = { # Using 'explainability' key for consistency
+            # Ensure 'explainability' key exists in unified structure
+            if 'explainability' not in combined_data:
+                combined_data['explainability'] = {}
+            
+            # Update this symbol's SHAP data (nested under explainability key)
+            combined_data['explainability'][symbol] = {
                 'shap_values': shap_values,
                 'X_sample': X,
                 'feature_names': feature_names,
@@ -526,14 +532,20 @@ class ModelExplainability:
     def create_dashboard_visualizations(self, symbol: str) -> Dict[str, Any]:
         """Generate charts for dashboard from saved artifacts."""
         vis = {}
-        output_file = self.artifacts_path / f"{symbol}_analysis_results.pkl"
+        output_file = self.artifacts_path / "_analysis_results.pkl"
         
         if not output_file.exists():
             return vis
             
         try:
             data = joblib.load(output_file)
-            shap_data = data.get('explainability')
+            
+            # Access explainability data for this symbol
+            if 'explainability' not in data or symbol not in data['explainability']:
+                self.logger.warning(f"No SHAP data found for {symbol}")
+                return vis
+            
+            shap_data = data['explainability'][symbol]
             
             if shap_data:
                 # Re-generate key charts on demand

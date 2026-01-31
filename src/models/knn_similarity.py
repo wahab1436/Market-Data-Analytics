@@ -942,11 +942,12 @@ class KNNSimilarity:
     
     def _save_symbol_results(self, symbol: str, results: Dict[str, Any]):
         """
-        FIXED: Merges KNN results into the shared analysis file using Load-Update-Save.
+        FIXED: Merges KNN results into the unified _analysis_results.pkl file.
+        Uses Load-Update-Save pattern to preserve data from other modules.
         """
         try:
             self.artifacts_path.mkdir(parents=True, exist_ok=True)
-            output_file = self.artifacts_path / f"{symbol}_analysis_results.pkl"
+            output_file = self.artifacts_path / "_analysis_results.pkl"
             
             # 1. Prepare data (filter non-serializable Plotly charts/models if needed)
             # Keeping models out of the results pickle to keep it light; models are saved separately in _save_models
@@ -965,13 +966,18 @@ class KNNSimilarity:
                     final_data = joblib.load(output_file)
                     if not isinstance(final_data, dict):
                         final_data = {}
-                except:
+                except Exception as e:
+                    self.logger.warning(f"Could not load existing results: {e}")
                     final_data = {}
             
-            # 3. Update 'knn' key
-            final_data['knn'] = save_results
+            # 3. Ensure 'knn' key exists in unified structure
+            if 'knn' not in final_data:
+                final_data['knn'] = {}
             
-            # 4. Save back
+            # 4. Update this symbol's KNN data (nested under knn key)
+            final_data['knn'][symbol] = save_results
+            
+            # 5. Save back to unified file
             joblib.dump(final_data, output_file)
             self.logger.info(f"Merged KNN results for {symbol} into {output_file}")
             
