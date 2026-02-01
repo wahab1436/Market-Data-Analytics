@@ -8,8 +8,9 @@ FIXED: Updated to work with corrected analysis and model modules
 import argparse
 import sys
 import yaml
+import pandas as pd  # ADDED: Missing import
 from pathlib import Path
-from typing import Dict, Any, List  # Added List import
+from typing import Dict, Any, List
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -25,7 +26,6 @@ from src.analysis.similarity_analysis import SimilarityAnalysis
 from src.models.regression import RegressionModels
 from src.models.knn_similarity import KNNSimilarity
 from src.models.xgboost_model import XGBoostModel
-# Removed problematic explainability import - it's handled within models now
 
 
 class MarketInsightPlatform:
@@ -154,7 +154,7 @@ class MarketInsightPlatform:
             # Verify we have enough data for modeling
             data_summary = {}
             for symbol, df in features_data.items():  # CHANGED: features_data directly, not features_data['by_symbol']
-                if isinstance(df, pd.DataFrame):  # Ensure it's a DataFrame
+                if isinstance(df, pd.DataFrame):  # FIXED: Now pd is defined
                     data_summary[symbol] = len(df)
                     self.logger.info(f"{symbol}: {len(df)} records after feature engineering")
             
