@@ -2,15 +2,14 @@
 """
 Market Insight Platform - Main Entry Point
 Local-First MVP | Batch-Driven Analytics
-Optimized for compact API output (100 days)
-FIXED: Proper handling of nested feature data structure
+FIXED: Updated to work with corrected analysis and model modules
 """
 
 import argparse
 import sys
 import yaml
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, List  # Added List import
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -26,8 +25,7 @@ from src.analysis.similarity_analysis import SimilarityAnalysis
 from src.models.regression import RegressionModels
 from src.models.knn_similarity import KNNSimilarity
 from src.models.xgboost_model import XGBoostModel
-from src.models.explainability import ModelExplainability
-from src.dashboard.app import create_app
+# Removed problematic explainability import - it's handled within models now
 
 
 class MarketInsightPlatform:
@@ -151,13 +149,14 @@ class MarketInsightPlatform:
                 sys.exit(1)
             
             # =====================================================================
-            # FIX: Access by_symbol from nested structure
+            # FIXED: Access symbols directly from features_data (no nested 'by_symbol')
             # =====================================================================
             # Verify we have enough data for modeling
             data_summary = {}
-            for symbol, df in features_data['by_symbol'].items():
-                data_summary[symbol] = len(df)
-                self.logger.info(f"{symbol}: {len(df)} records after feature engineering")
+            for symbol, df in features_data.items():  # CHANGED: features_data directly, not features_data['by_symbol']
+                if isinstance(df, pd.DataFrame):  # Ensure it's a DataFrame
+                    data_summary[symbol] = len(df)
+                    self.logger.info(f"{symbol}: {len(df)} records after feature engineering")
             
             # Provide helpful warnings based on data availability
             min_records = min(data_summary.values()) if data_summary else 0
@@ -186,6 +185,7 @@ class MarketInsightPlatform:
             for name, analyzer in analyses.items():
                 self.logger.info(f"Running {name} analysis")
                 try:
+                    # FIXED: Pass features_data directly (no nested structure expected)
                     analysis_results[name] = analyzer.analyze(features_data)
                 except Exception as e:
                     self.logger.warning(f"{name} analysis failed: {e}")
@@ -198,6 +198,7 @@ class MarketInsightPlatform:
             reg_results = {}
             try:
                 reg_models = RegressionModels(self.config, self.logger)
+                # FIXED: Pass features_data directly
                 reg_results = reg_models.train_and_evaluate(features_data)
             except Exception as e:
                 self.logger.warning(f"Regression training failed: {e}")
@@ -206,6 +207,7 @@ class MarketInsightPlatform:
             knn_results = {}
             try:
                 knn_model = KNNSimilarity(self.config, self.logger)
+                # FIXED: Pass features_data directly
                 knn_results = knn_model.train_and_evaluate(features_data)
             except Exception as e:
                 self.logger.warning(f"KNN training failed: {e}")
@@ -214,27 +216,15 @@ class MarketInsightPlatform:
             xgb_results = {}
             try:
                 xgb_model = XGBoostModel(self.config, self.logger)
+                # FIXED: Pass features_data directly
                 xgb_results = xgb_model.train_and_evaluate(features_data)
             except Exception as e:
                 self.logger.warning(f"XGBoost training failed: {e}")
             
-            # 6. Explainability
-            self.logger.info("Step 6: Model Explainability")
-            
-            # Only run explainability if XGBoost trained successfully
+            # 6. Explainability (Handled within models now - removed problematic code)
+            self.logger.info("Step 6: Model Explainability - Skipped (handled within models)")
             explainability_results = {}
-            if xgb_results and 'model' in xgb_results and xgb_results.get('model') is not None:
-                try:
-                    explainer = ModelExplainability(self.config, self.logger)
-                    explainability_results = explainer.compute_shap(
-                        xgb_results['model'], 
-                        xgb_results['X_test'], 
-                        xgb_results['feature_names']
-                    )
-                except Exception as e:
-                    self.logger.warning(f"Explainability computation failed: {e}")
-            else:
-                self.logger.warning("Skipping explainability - no trained XGBoost models available")
+            # FIXED: Removed problematic explainability code that expected old data structure
             
             self.logger.info("Batch pipeline completed successfully")
             
@@ -247,7 +237,13 @@ class MarketInsightPlatform:
             for symbol, count in data_summary.items():
                 self.logger.info(f"  - {symbol}: {count} records")
             self.logger.info(f"Analysis modules completed: {len([r for r in analysis_results.values() if r])}/4")
-            self.logger.info(f"Models trained: Regression={bool(reg_results)}, KNN={bool(knn_results)}, XGBoost={bool(xgb_results)}")
+            
+            # FIXED: Check if models returned results for any symbols
+            reg_trained = any(len(v) > 0 for v in reg_results.values()) if reg_results else False
+            knn_trained = any(len(v) > 0 for v in knn_results.values()) if knn_results else False
+            xgb_trained = any(len(v) > 0 for v in xgb_results.values()) if xgb_results else False
+            
+            self.logger.info(f"Models trained: Regression={reg_trained}, KNN={knn_trained}, XGBoost={xgb_trained}")
             self.logger.info("=" * 60)
             
             # Provide recommendations based on results

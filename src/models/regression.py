@@ -94,7 +94,7 @@ class RegressionModels:
             # Save models (saved separately to keep results lightweight)
             self._save_models(models, symbol)
             
-            # Save symbol results to artifacts using SHARED MERGE LOGIC
+            # Save symbol results to artifacts using FIXED MERGE LOGIC
             self._save_symbol_results(symbol, symbol_results)
             
             results[symbol] = symbol_results
@@ -809,38 +809,36 @@ class RegressionModels:
 
     def _save_symbol_results(self, symbol: str, results: Dict[str, Any]) -> None:
         """
-        FIXED: Merges regression results into the unified _analysis_results.pkl file.
-        Uses Load-Update-Save pattern to preserve data from other modules.
+        FIXED: Save regression results to proper unified file structure.
         """
         try:
-            self.artifacts_path.mkdir(parents=True, exist_ok=True)
-            output_file = self.artifacts_path / "_analysis_results.pkl"
+            # Convert Plotly figures to JSON
+            if 'charts' in results:
+                serialized_charts = {}
+                for chart_name, fig in results['charts'].items():
+                    if isinstance(fig, go.Figure):
+                        serialized_charts[chart_name] = fig.to_json()
+                    else:
+                        serialized_charts[chart_name] = fig
+                results['charts'] = serialized_charts
             
-            # 1. Prepare data (filter out heavy objects)
-            save_results = {k: v for k, v in results.items() 
-                           if k not in ['models', 'charts', 'fig', 'plots']}
+            # Remove non-serializable models from results (they're saved separately)
+            results.pop('models', None)
             
-            # 2. Load existing
-            final_data = {}
-            if output_file.exists():
-                try:
-                    final_data = joblib.load(output_file)
-                    if not isinstance(final_data, dict):
-                        final_data = {}
-                except Exception as e:
-                    self.logger.warning(f"Could not load existing results: {e}")
-                    final_data = {}
+            # Load existing model results or create new
+            model_file = self.artifacts_path / f"{symbol}_model_results.pkl"
+            if model_file.exists():
+                existing_data = joblib.load(model_file)
+            else:
+                existing_data = {}
             
-            # 3. Ensure 'regression' key exists in unified structure
-            if 'regression' not in final_data:
-                final_data['regression'] = {}
+            # Update with regression results
+            existing_data['regression'] = results
             
-            # 4. Update this symbol's regression data (nested under regression key)
-            final_data['regression'][symbol] = save_results
+            # Save back to unified file
+            joblib.dump(existing_data, model_file)
             
-            # 5. Save back to unified file
-            joblib.dump(final_data, output_file)
-            self.logger.info(f"Merged regression results for {symbol} into {output_file}")
+            self.logger.info(f"Saved regression results for {symbol} to {model_file}")
             
         except Exception as e:
-            self.logger.error(f"Error saving regression results for {symbol}: {str(e)}")
+            self.logger.error(f"Error saving regression results for {symbol}: {e}")

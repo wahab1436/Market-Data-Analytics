@@ -99,7 +99,7 @@ class KNNSimilarity:
             # Save models
             self._save_models(models, symbol)
             
-            # Save results to artifacts folder using SHARED MERGE LOGIC
+            # Save results to artifacts folder using FIXED MERGE LOGIC
             self._save_symbol_results(symbol, symbol_results)
             
             results[symbol] = symbol_results
@@ -942,44 +942,36 @@ class KNNSimilarity:
     
     def _save_symbol_results(self, symbol: str, results: Dict[str, Any]):
         """
-        FIXED: Merges KNN results into the unified _analysis_results.pkl file.
-        Uses Load-Update-Save pattern to preserve data from other modules.
+        FIXED: Save KNN results to proper unified file structure.
         """
         try:
-            self.artifacts_path.mkdir(parents=True, exist_ok=True)
-            output_file = self.artifacts_path / "_analysis_results.pkl"
+            # Convert Plotly figures to JSON
+            if 'charts' in results:
+                serialized_charts = {}
+                for chart_name, fig in results['charts'].items():
+                    if isinstance(fig, go.Figure):
+                        serialized_charts[chart_name] = fig.to_json()
+                    else:
+                        serialized_charts[chart_name] = fig
+                results['charts'] = serialized_charts
             
-            # 1. Prepare data (filter non-serializable Plotly charts/models if needed)
-            # Keeping models out of the results pickle to keep it light; models are saved separately in _save_models
-            save_results = {
-                'metrics': results.get('metrics', {}),
-                'predictions': results.get('predictions', {}),
-                'similarities': results.get('similarities', {}),
-                'analogs': results.get('analogs', {}),
-                'insights': results.get('insights', [])
-            }
+            # Remove non-serializable models from results (they're saved separately)
+            results.pop('models', None)
             
-            # 2. Load existing
-            final_data = {}
-            if output_file.exists():
-                try:
-                    final_data = joblib.load(output_file)
-                    if not isinstance(final_data, dict):
-                        final_data = {}
-                except Exception as e:
-                    self.logger.warning(f"Could not load existing results: {e}")
-                    final_data = {}
+            # Load existing model results or create new
+            model_file = self.artifacts_path / f"{symbol}_model_results.pkl"
+            if model_file.exists():
+                existing_data = joblib.load(model_file)
+            else:
+                existing_data = {}
             
-            # 3. Ensure 'knn' key exists in unified structure
-            if 'knn' not in final_data:
-                final_data['knn'] = {}
+            # Update with KNN results
+            existing_data['knn'] = results
             
-            # 4. Update this symbol's KNN data (nested under knn key)
-            final_data['knn'][symbol] = save_results
+            # Save back to unified file
+            joblib.dump(existing_data, model_file)
             
-            # 5. Save back to unified file
-            joblib.dump(final_data, output_file)
-            self.logger.info(f"Merged KNN results for {symbol} into {output_file}")
+            self.logger.info(f"Saved KNN results for {symbol} to {model_file}")
             
         except Exception as e:
-            self.logger.error(f"Error saving KNN results for {symbol}: {str(e)}")
+            self.logger.error(f"Error saving KNN results for {symbol}: {e}")

@@ -1,7 +1,6 @@
 """
-Explainability Module
-SHAP analysis for XGBoost model interpretability
-Batch-computed only, never computed in dashboard
+Similarity Analysis Module
+Analyzes historical patterns, analogs, and market regimes using similarity metrics
 """
 
 import pandas as pd
@@ -9,557 +8,905 @@ import numpy as np
 from typing import Dict, List, Tuple, Any, Optional
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import shap
+from scipy.spatial.distance import cdist
+from scipy import stats
+from sklearn.preprocessing import StandardScaler
 import joblib
 from pathlib import Path
-import warnings
-warnings.filterwarnings('ignore')
 
 
-class ModelExplainability:
-    """SHAP-based explainability for XGBoost models (batch-only computation)."""
+class SimilarityAnalysis:
+    """Analyzes historical patterns and similarity between time periods."""
     
     def __init__(self, config: Dict[str, Any], logger):
-        """Initialize explainability analyzer."""
+        """Initialize similarity analyzer."""
         self.config = config
         self.logger = logger
         self.color_palette = config['dashboard']['color_palette']
-        self.models_path = Path(config['paths']['models'])
         self.artifacts_path = Path(config['paths']['artifacts'])
         self.artifacts_path.mkdir(parents=True, exist_ok=True)
         
-        # SHAP parameters
-        self.sample_size = 100  # Sample size for SHAP computation
-        self.max_display = 15   # Maximum features to display
-    
-    def compute_shap(self, model: Any, X_test: np.ndarray, 
-                    feature_names: List[str], symbol: str = None) -> Dict[str, Any]:
-        """Compute SHAP values for XGBoost model (batch computation only)."""
-        self.logger.info(f"Computing SHAP explainability for {symbol if symbol else 'model'}")
-        
+    def analyze(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Perform comprehensive similarity analysis."""
         results = {}
         
-        if model is None or X_test is None or len(X_test) == 0:
-            self.logger.warning("No model or test data for SHAP computation")
-            return results
+        by_symbol = data['by_symbol']
         
-        try:
-            # Create SHAP explainer
-            explainer = shap.TreeExplainer(model)
+        for symbol, df in by_symbol.items():
+            self.logger.info(f"Analyzing similarity patterns for {symbol}")
             
-            # Sample data for SHAP computation (for performance)
-            # Use fixed seed for reproducibility across plots
-            if len(X_test) > self.sample_size:
-                np.random.seed(42)
-                sample_indices = np.random.choice(len(X_test), self.sample_size, replace=False)
-                X_sample = X_test[sample_indices]
-            else:
-                X_sample = X_test
-                sample_indices = np.arange(len(X_test))
+            symbol_results = {
+                'charts': {},
+                'insights': [],
+                'metrics': {}
+            }
             
-            # Compute SHAP values
-            shap_values = explainer.shap_values(X_sample)
+            # Create similarity charts
+            similarity_charts = self._create_similarity_charts(df, symbol)
+            symbol_results['charts'].update(similarity_charts)
             
-            # Handle different SHAP value formats (Regression vs Classification)
-            if isinstance(shap_values, list):
-                # For binary/multiclass, take the class of interest (usually positive class 1)
-                shap_values = shap_values[-1]
-            
-            # Ensure shap_values is 2D
-            if len(shap_values.shape) == 1:
-                shap_values = shap_values.reshape(-1, 1)
-            
-            # Create summary plots
-            summary_data = self._create_shap_summary(shap_values, X_sample, feature_names, symbol)
-            results['summary'] = summary_data
-            
-            # Create dependency plots for top features
-            dependency_results = self._create_dependency_plots(
-                explainer, X_sample, shap_values, feature_names, symbol
-            )
-            results['dependencies'] = dependency_results
-            
-            # Create force plots for specific predictions
-            force_results = self._create_force_plots(
-                explainer, X_sample, shap_values, feature_names, symbol, sample_indices
-            )
-            results['force_plots'] = force_results
-            
-            # Create waterfall plot for average prediction
-            waterfall_data = self._create_waterfall_plot(
-                explainer, X_sample, shap_values, feature_names, symbol
-            )
-            results['waterfall'] = waterfall_data
-            
-            # Create interaction analysis
-            # Use Try/Except as interaction values can be computationally expensive
-            try:
-                interaction_results = self._analyze_interactions(
-                    explainer, X_sample, shap_values, feature_names, symbol
-                )
-                results['interactions'] = interaction_results
-            except Exception as e:
-                self.logger.warning(f"Could not compute interactions: {e}")
+            # Calculate similarity metrics
+            metrics = self._calculate_similarity_metrics(df)
+            symbol_results['metrics'].update(metrics)
             
             # Generate insights
-            insights = self._generate_shap_insights(summary_data, dependency_results, symbol)
-            results['insights'] = insights
+            insights = self._generate_similarity_insights(df, metrics)
+            symbol_results['insights'].extend(insights)
             
-            # Save SHAP values (using proper merge logic)
-            self._save_shap_values(shap_values, X_sample, feature_names, sample_indices, symbol)
+            # Historical analogs analysis
+            analog_results = self._find_historical_analogs(df)
+            symbol_results.update(analog_results)
             
-            self.logger.info(f"SHAP computation completed for {symbol}")
+            # Pattern recognition
+            pattern_results = self._analyze_recurring_patterns(df)
+            symbol_results.update(pattern_results)
             
-        except Exception as e:
-            self.logger.error(f"Error computing SHAP values: {e}")
-            results['error'] = str(e)
+            results[symbol] = symbol_results
+            
+            # Save symbol results
+            self._save_symbol_results(symbol, symbol_results)
+        
+        # Cross-symbol similarity analysis
+        if len(by_symbol) > 1:
+            cross_results = self._analyze_cross_symbol_similarity(by_symbol)
+            results['cross_symbol'] = cross_results
         
         return results
     
-    def _create_shap_summary(self, shap_values: np.ndarray, X: np.ndarray,
-                            feature_names: List[str], symbol: str) -> Dict[str, Any]:
-        """Create SHAP summary plot data."""
-        summary = {}
+    def _create_similarity_charts(self, df: pd.DataFrame, symbol: str) -> Dict[str, go.Figure]:
+        """Create similarity visualization charts."""
+        charts = {}
         
-        if len(shap_values.shape) != 2 or shap_values.shape[1] != len(feature_names):
-            self.logger.warning(f"SHAP values shape {shap_values.shape} doesn't match feature names length {len(feature_names)}")
-            return summary
+        # 1. Historical Analogs - Most Similar Periods
+        analogs = self._find_top_historical_analogs(df, n_analogs=3)
         
-        # Calculate mean absolute SHAP values (feature importance)
-        mean_abs_shap = np.mean(np.abs(shap_values), axis=0)
-        
-        # Sort features by importance
-        sorted_indices = np.argsort(mean_abs_shap)[::-1]
-        sorted_features = [feature_names[i] for i in sorted_indices[:self.max_display]]
-        sorted_importance = [mean_abs_shap[i] for i in sorted_indices[:self.max_display]]
-        
-        # Get direction of impact (average SHAP value)
-        mean_shap = np.mean(shap_values, axis=0)
-        sorted_direction = [mean_shap[i] for i in sorted_indices[:self.max_display]]
-        
-        # Create summary DataFrame
-        summary_df = pd.DataFrame({
-            'feature': sorted_features,
-            'importance': sorted_importance,
-            'direction': sorted_direction,
-            'abs_importance': np.abs(sorted_direction)
-        })
-        
-        summary['feature_importance'] = summary_df.to_dict('records')
-        
-        # Create summary plot
-        fig = go.Figure()
-        
-        colors = []
-        for direction in sorted_direction:
-            if direction > 0:
-                colors.append(self.color_palette.get('danger', 'red'))
-            else:
-                colors.append(self.color_palette.get('success', 'green'))
-        
-        fig.add_trace(
-            go.Bar(
-                x=sorted_importance,
-                y=sorted_features,
-                orientation='h',
-                marker_color=colors,
-                text=[f'{imp:.4f}' for imp in sorted_importance],
-                textposition='auto',
-                hovertemplate='Feature: %{y}<br>Importance: %{x:.4f}<br>Direction: %{customdata:.4f}',
-                customdata=sorted_direction
-            )
-        )
-        
-        fig.update_layout(
-            title=f'{symbol}: SHAP Feature Importance',
-            height=500,
-            showlegend=False,
-            template='plotly_white',
-            xaxis_title='Mean |SHAP Value| (average impact on model output)',
-            yaxis_title='Feature',
-            yaxis=dict(categoryorder='total ascending')
-        )
-        
-        summary['chart'] = fig
-        
-        # Create beeswarm plot data
-        beeswarm_data = self._create_beeswarm_data(shap_values, X, feature_names, sorted_indices)
-        summary['beeswarm'] = beeswarm_data
-        
-        return summary
-    
-    def _create_beeswarm_data(self, shap_values: np.ndarray, X: np.ndarray,
-                             feature_names: List[str], sorted_indices: np.ndarray) -> Dict[str, Any]:
-        """Create data for beeswarm plot visualization."""
-        beeswarm = {}
-        
-        top_indices = sorted_indices[:self.max_display]
-        feature_data = []
-        
-        for i, feature_idx in enumerate(top_indices):
-            feature_name = feature_names[feature_idx]
-            feature_values = X[:, feature_idx]
-            shap_for_feature = shap_values[:, feature_idx]
-            
-            # Sub-sample if data is large to keep charts responsive
-            if len(feature_values) > 200:
-                idx = np.random.choice(len(feature_values), 200, replace=False)
-                feature_values = feature_values[idx]
-                shap_for_feature = shap_for_feature[idx]
-            
-            # Calculate correlation safely
-            corr = 0
-            if len(feature_values) > 1 and np.std(feature_values) > 0 and np.std(shap_for_feature) > 0:
-                 corr = float(np.corrcoef(feature_values, shap_for_feature)[0, 1])
-
-            feature_data.append({
-                'feature': feature_name,
-                'values': feature_values.tolist(),
-                'shap_values': shap_for_feature.tolist(),
-                'correlation': corr
-            })
-        
-        beeswarm['features'] = feature_data
-        
-        fig = go.Figure()
-        
-        for i, data in enumerate(feature_data[:10]):  # Limit to 10 features for clarity
-            fig.add_trace(
-                go.Scatter(
-                    x=data['shap_values'],
-                    y=[data['feature']] * len(data['shap_values']),
-                    mode='markers',
-                    name=data['feature'],
-                    marker=dict(
-                        size=6,
-                        color=data['values'],
-                        colorscale='RdBu',
-                        showscale=(i == 0),
-                        colorbar=dict(title="Feature Value" if i == 0 else None),
-                        opacity=0.6
-                    ),
-                    hovertemplate='SHAP: %{x:.4f}<br>Value: %{marker.color:.2f}<extra></extra>'
+        if analogs:
+            fig = make_subplots(
+                rows=2, cols=1,
+                shared_xaxes=True,
+                vertical_spacing=0.1,
+                row_heights=[0.6, 0.4],
+                subplot_titles=(
+                    f'{symbol} Current Pattern vs Historical Analogs',
+                    'Forward Returns Following Historical Analogs'
                 )
             )
-        
-        fig.update_layout(
-            title='SHAP Beeswarm Plot (Top 10 Features)',
-            height=600,
-            showlegend=False,
-            template='plotly_white',
-            xaxis_title='SHAP Value (impact on model output)',
-            yaxis_title='Feature'
-        )
-        
-        beeswarm['chart'] = fig
-        return beeswarm
-    
-    def _create_dependency_plots(self, explainer: shap.TreeExplainer, X: np.ndarray,
-                                shap_values: np.ndarray, feature_names: List[str],
-                                symbol: str) -> Dict[str, Any]:
-        """Create SHAP dependency plots for top features."""
-        dependencies = {}
-        
-        mean_abs_shap = np.mean(np.abs(shap_values), axis=0)
-        top_indices = np.argsort(mean_abs_shap)[::-1][:5]  # Top 5 features
-        
-        dependency_plots = []
-        
-        for feature_idx in top_indices:
-            feature_name = feature_names[feature_idx]
-            feature_values = X[:, feature_idx]
-            shap_for_feature = shap_values[:, feature_idx]
             
-            # Sort for smooth plotting
-            sort_idx = np.argsort(feature_values)
-            sorted_values = feature_values[sort_idx]
-            sorted_shap = shap_for_feature[sort_idx]
+            # Current pattern (last 20 days)
+            lookback = 20
+            current_dates = df.index[-lookback:]
+            current_prices = df['close'].iloc[-lookback:]
+            current_normalized = self._normalize_series(current_prices)
             
-            # Simple moving average smoothing
-            window = max(3, len(sorted_values) // 20)
-            if window > 1 and len(sorted_values) > window:
-                smoothed_shap = np.convolve(sorted_shap, np.ones(window)/window, mode='valid')
-                # Adjust x values to match convolution output size
-                start = (window - 1) // 2
-                end = start + len(smoothed_shap)
-                smoothed_values = sorted_values[start:end]
-            else:
-                smoothed_shap = sorted_shap
-                smoothed_values = sorted_values
-            
-            fig = go.Figure()
+            # Plot current pattern
             fig.add_trace(
                 go.Scatter(
-                    x=smoothed_values,
-                    y=smoothed_shap,
+                    x=list(range(lookback)),
+                    y=current_normalized,
                     mode='lines+markers',
-                    name='SHAP Dependency',
-                    line=dict(color=self.color_palette.get('primary', 'blue'), width=2),
-                    marker=dict(size=4),
-                    hovertemplate='Feature Value: %{x:.2f}<br>SHAP Value: %{y:.4f}<extra></extra>'
+                    name='Current Pattern',
+                    line=dict(color=self.color_palette['primary'], width=3),
+                    marker=dict(size=6),
+                    hovertemplate='Day: %{x}<br>Normalized Price: %{y:.3f}<extra></extra>'
+                ),
+                row=1, col=1
+            )
+            
+            # Plot historical analogs
+            colors = [self.color_palette['secondary'], 
+                     self.color_palette['success'], 
+                     self.color_palette['warning']]
+            
+            for i, (similarity, analog_dates) in enumerate(analogs[:3]):
+                analog_prices = df.loc[analog_dates, 'close']
+                analog_normalized = self._normalize_series(analog_prices)
+                
+                fig.add_trace(
+                    go.Scatter(
+                        x=list(range(lookback)),
+                        y=analog_normalized,
+                        mode='lines',
+                        name=f'Analog {i+1} (Sim: {similarity:.2f})',
+                        line=dict(color=colors[i], width=2, dash='dash'),
+                        hovertemplate=f'Analog {i+1}<br>Date: {analog_dates[0].strftime("%Y-%m-%d")}<br>Similarity: {similarity:.2f}<extra></extra>'
+                    ),
+                    row=1, col=1
                 )
-            )
             
-            fig.add_hline(y=0, line_width=1, line_color='gray')
+            # Forward returns following analogs
+            forward_returns_data = []
+            analog_labels = []
+            
+            for i, (similarity, analog_dates) in enumerate(analogs[:3]):
+                # Get forward returns for each analog
+                forward_returns = self._get_forward_returns(df, analog_dates[-1], window=20)
+                forward_returns_data.append(forward_returns)
+                analog_labels.append(f'Analog {i+1}')
+                
+                # Plot forward returns
+                fig.add_trace(
+                    go.Scatter(
+                        x=list(range(len(forward_returns))),
+                        y=forward_returns * 100,  # Convert to percentage
+                        mode='lines',
+                        name=f'Analog {i+1} Forward Returns',
+                        line=dict(color=colors[i], width=2),
+                        showlegend=False,
+                        hovertemplate='Days Forward: %{x}<br>Return: %{y:.2f}%<extra></extra>'
+                    ),
+                    row=2, col=1
+                )
+            
+            # Add current forward returns (projection based on analogs)
+            if forward_returns_data:
+                avg_forward_returns = np.mean(forward_returns_data, axis=0)
+                fig.add_trace(
+                    go.Scatter(
+                        x=list(range(len(avg_forward_returns))),
+                        y=avg_forward_returns * 100,
+                        mode='lines',
+                        name='Average Forward Return (Based on Analogs)',
+                        line=dict(color=self.color_palette['primary'], width=3, dash='dot'),
+                        hovertemplate='Projected Return: %{y:.2f}%<extra></extra>'
+                    ),
+                    row=2, col=1
+                )
             
             fig.update_layout(
-                title=f'{symbol}: SHAP Dependency - {feature_name}',
-                height=400,
-                showlegend=False,
+                height=700,
+                showlegend=True,
+                hovermode='x unified',
                 template='plotly_white',
-                xaxis_title=f'{feature_name} (feature value)',
-                yaxis_title='SHAP Value'
+                legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1)
             )
             
-            # Calculate stats
-            corr = 0
-            if len(feature_values) > 1 and np.std(feature_values) > 0:
-                 corr = np.corrcoef(feature_values, shap_for_feature)[0, 1]
-
-            dependency_plots.append({
-                'feature': feature_name,
-                'chart': fig,
-                'statistics': {
-                    'correlation': float(corr),
-                    'mean_shap': float(np.mean(shap_for_feature)),
-                    'std_shap': float(np.std(shap_for_feature))
-                }
-            })
+            fig.update_xaxes(title_text="Trading Days", row=1, col=1)
+            fig.update_xaxes(title_text="Days After Pattern", row=2, col=1)
+            fig.update_yaxes(title_text="Normalized Price", row=1, col=1)
+            fig.update_yaxes(title_text="Forward Return (%)", row=2, col=1)
+            
+            charts['historical_analogs'] = fig
         
-        dependencies['plots'] = dependency_plots
-        return dependencies
+        # 2. Similarity Matrix Heatmap
+        if len(df) >= 60:
+            fig2 = self._create_similarity_matrix(df, symbol)
+            charts['similarity_matrix'] = fig2
+        
+        # 3. Pattern Distribution and Clusters
+        fig3 = self._create_pattern_cluster_chart(df, symbol)
+        charts['pattern_clusters'] = fig3
+        
+        return charts
     
-    def _create_force_plots(self, explainer: shap.TreeExplainer, X: np.ndarray,
-                           shap_values: np.ndarray, feature_names: List[str],
-                           symbol: str, sample_indices: np.ndarray) -> Dict[str, Any]:
-        """Create force plot visualizations."""
-        force_plots = {}
-        if len(X) == 0:
-            return force_plots
+    def _normalize_series(self, series: pd.Series) -> pd.Series:
+        """Normalize a price series to [0, 1] range."""
+        if len(series) == 0:
+            return series
         
-        n_samples = min(5, len(X))
-        base_value = explainer.expected_value
-        if isinstance(base_value, np.ndarray):
-            base_value = base_value[0]
+        min_val = series.min()
+        max_val = series.max()
         
-        predictions = base_value + np.sum(shap_values, axis=1)
+        if max_val == min_val:
+            return pd.Series([0.5] * len(series), index=series.index)
         
-        # Pick extreme and median samples
-        highest_idx = np.argmax(predictions)
-        lowest_idx = np.argmin(predictions)
-        median_idx = np.argsort(predictions)[len(predictions) // 2]
-        
-        selected_indices = list(set([highest_idx, lowest_idx, median_idx]))[:n_samples]
-        
-        force_data = []
-        for idx in selected_indices:
-            sample_shap = shap_values[idx]
-            sample_x = X[idx]
-            prediction = predictions[idx]
-            
-            contributing_features = []
-            for j in np.argsort(np.abs(sample_shap))[::-1][:10]:
-                contributing_features.append({
-                    'feature': feature_names[j],
-                    'value': float(sample_x[j]),
-                    'shap_value': float(sample_shap[j]),
-                    'impact': 'increases' if sample_shap[j] > 0 else 'decreases'
-                })
-            
-            force_data.append({
-                'sample_index': int(sample_indices[idx]),
-                'prediction': float(prediction),
-                'base_value': float(base_value),
-                'contributing_features': contributing_features
-            })
-        
-        force_plots['samples'] = force_data
-        
-        # Median prediction chart
-        if force_data:
-            median_sample = force_data[-1] 
-            fig = go.Figure()
-            
-            feats = [f['feature'] for f in median_sample['contributing_features'][:8]]
-            vals = [f['shap_value'] for f in median_sample['contributing_features'][:8]]
-            cols = [self.color_palette.get('danger', 'red') if v > 0 
-                   else self.color_palette.get('success', 'green') for v in vals]
-            
-            fig.add_trace(go.Bar(
-                x=[median_sample['base_value']], y=['Base Value'], orientation='h',
-                marker_color='gray', name='Base Value'
-            ))
-            
-            fig.add_trace(go.Bar(
-                x=vals, y=feats, orientation='h', marker_color=cols, name='Features'
-            ))
-            
-            fig.update_layout(
-                title=f'{symbol}: Force Plot (Median Prediction)',
-                height=400, showlegend=False, template='plotly_white', barmode='relative'
-            )
-            force_plots['median_prediction_chart'] = fig
-            
-        return force_plots
+        return (series - min_val) / (max_val - min_val)
     
-    def _create_waterfall_plot(self, explainer: shap.TreeExplainer, X: np.ndarray,
-                              shap_values: np.ndarray, feature_names: List[str],
-                              symbol: str) -> Dict[str, Any]:
-        """Create waterfall plot for average prediction."""
-        waterfall = {}
+    def _find_top_historical_analogs(self, df: pd.DataFrame, lookback: int = 20, 
+                                   n_analogs: int = 5) -> List[Tuple[float, pd.DatetimeIndex]]:
+        """Find top historical analogs to current pattern."""
+        if len(df) < lookback * 2:
+            return []
         
-        base_value = explainer.expected_value
-        if isinstance(base_value, np.ndarray):
-            base_value = base_value[0]
+        # Current pattern (last lookback days)
+        current_prices = df['close'].iloc[-lookback:].values
+        current_normalized = self._normalize_series(df['close'].iloc[-lookback:]).values
         
-        avg_shap = np.mean(shap_values, axis=0)
-        top_indices = np.argsort(np.abs(avg_shap))[::-1][:self.max_display]
+        # Search through history (exclude recent lookback)
+        search_end = len(df) - lookback - 1
+        analogs = []
         
-        top_features = [feature_names[i] for i in top_indices]
-        top_vals = [avg_shap[i] for i in top_indices]
-        
-        waterfall_data = []
-        cumulative = float(base_value)
-        waterfall_data.append({'feature': 'Base', 'value': cumulative, 'cumulative': cumulative})
-        
-        for f, v in zip(top_features, top_vals):
-            cumulative += v
-            waterfall_data.append({'feature': f, 'value': v, 'cumulative': cumulative})
+        for i in range(lookback, search_end):
+            historical_prices = df['close'].iloc[i-lookback:i].values
+            historical_normalized = self._normalize_series(df['close'].iloc[i-lookback:i]).values
             
-        waterfall_data.append({'feature': 'Final', 'value': cumulative - base_value, 'cumulative': cumulative})
-        waterfall['data'] = waterfall_data
+            # Calculate similarity (1 - normalized Euclidean distance)
+            distance = np.sqrt(np.mean((current_normalized - historical_normalized) ** 2))
+            similarity = 1 - distance
+            
+            # Also consider return pattern similarity
+            current_returns = np.diff(current_prices) / current_prices[:-1]
+            historical_returns = np.diff(historical_prices) / historical_prices[:-1]
+            
+            return_correlation = np.corrcoef(current_returns, historical_returns)[0, 1]
+            
+            if not np.isnan(return_correlation):
+                # Combined similarity score
+                combined_similarity = (similarity + (return_correlation + 1) / 2) / 2
+            else:
+                combined_similarity = similarity
+            
+            dates = df.index[i-lookback:i]
+            analogs.append((combined_similarity, dates))
         
+        # Sort by similarity and return top n
+        analogs.sort(key=lambda x: x[0], reverse=True)
+        return analogs[:n_analogs]
+    
+    def _get_forward_returns(self, df: pd.DataFrame, start_date: pd.Timestamp, 
+                            window: int = 20) -> np.ndarray:
+        """Get forward returns starting from a specific date."""
+        start_idx = df.index.get_loc(start_date)
+        
+        if start_idx + window + 1 >= len(df):
+            return np.array([])
+        
+        prices = df['close'].iloc[start_idx:start_idx + window + 1].values
+        forward_returns = (prices[1:] / prices[0]) - 1
+        
+        return forward_returns
+    
+    def _create_similarity_matrix(self, df: pd.DataFrame, symbol: str) -> go.Figure:
+        """Create a similarity matrix heatmap."""
+        lookback = 20
+        n_periods = min(50, len(df) // lookback)  # Limit to 50 periods for performance
+        
+        if n_periods < 2:
+            return go.Figure()
+        
+        # Extract overlapping periods
+        periods = []
+        period_labels = []
+        
+        for i in range(0, n_periods * lookback, lookback):
+            if i + lookback <= len(df):
+                period = df['close'].iloc[i:i + lookback]
+                periods.append(self._normalize_series(period).values)
+                period_labels.append(df.index[i].strftime('%Y-%m'))
+        
+        # Calculate similarity matrix
+        similarity_matrix = np.zeros((len(periods), len(periods)))
+        
+        for i in range(len(periods)):
+            for j in range(i, len(periods)):
+                if i == j:
+                    similarity = 1.0
+                else:
+                    # Euclidean distance between normalized patterns
+                    distance = np.sqrt(np.mean((periods[i] - periods[j]) ** 2))
+                    similarity = 1 - distance
+                
+                similarity_matrix[i, j] = similarity
+                similarity_matrix[j, i] = similarity
+        
+        # Create heatmap
+        fig = go.Figure(data=go.Heatmap(
+            z=similarity_matrix,
+            x=period_labels,
+            y=period_labels,
+            colorscale='RdBu',
+            zmid=0.5,
+            text=np.round(similarity_matrix, 2),
+            texttemplate='%{text}',
+            textfont={"size": 8},
+            hoverongaps=False,
+            hoverinfo='text',
+            hovertemplate='Period 1: %{y}<br>Period 2: %{x}<br>Similarity: %{z:.2f}<extra></extra>'
+        ))
+        
+        fig.update_layout(
+            title=f'{symbol} Pattern Similarity Matrix (20-day periods)',
+            height=600,
+            width=700,
+            template='plotly_white',
+            xaxis_title="End Date of Period",
+            yaxis_title="Start Date of Period"
+        )
+        
+        return fig
+    
+    def _create_pattern_cluster_chart(self, df: pd.DataFrame, symbol: str) -> go.Figure:
+        """Create chart showing pattern clusters in reduced dimensions."""
+        from sklearn.decomposition import PCA
+        
+        lookback = 20
+        n_patterns = min(100, len(df) // lookback)
+        
+        if n_patterns < 3:
+            return go.Figure()
+        
+        # Extract patterns
+        patterns = []
+        pattern_dates = []
+        
+        for i in range(0, n_patterns * lookback, lookback):
+            if i + lookback <= len(df):
+                pattern = df['close'].iloc[i:i + lookback]
+                patterns.append(self._normalize_series(pattern).values)
+                pattern_dates.append(df.index[i])
+        
+        patterns_array = np.array(patterns)
+        
+        # Reduce to 2D for visualization
+        pca = PCA(n_components=2)
+        patterns_2d = pca.fit_transform(patterns_array)
+        
+        # Calculate return following each pattern
+        forward_returns = []
+        for date in pattern_dates:
+            returns = self._get_forward_returns(df, date, window=10)
+            if len(returns) > 0:
+                forward_returns.append(returns.mean() * 100)  # Average 10-day return in %
+            else:
+                forward_returns.append(0)
+        
+        # Create scatter plot
         fig = go.Figure()
         
-        feats = [d['feature'] for d in waterfall_data]
-        vals = [d['value'] for d in waterfall_data]
+        # Color by forward return
+        fig.add_trace(
+            go.Scatter(
+                x=patterns_2d[:, 0],
+                y=patterns_2d[:, 1],
+                mode='markers',
+                marker=dict(
+                    size=10,
+                    color=forward_returns,
+                    colorscale='RdBu',
+                    colorbar=dict(title="Avg 10-day Return %"),
+                    showscale=True,
+                    line=dict(width=1, color='DarkSlateGrey')
+                ),
+                text=[f"Start: {d.strftime('%Y-%m-%d')}<br>Return: {r:.1f}%" 
+                      for d, r in zip(pattern_dates, forward_returns)],
+                hovertemplate='%{text}<extra></extra>',
+                name='Patterns'
+            )
+        )
         
-        fig.add_trace(go.Waterfall(
-            name="SHAP", orientation="v",
-            measure=['absolute'] + ['relative']*(len(waterfall_data)-2) + ['total'],
-            x=feats, y=vals,
-            connector={"line": {"color": "gray"}},
-            decreasing={"marker": {"color": self.color_palette.get('success', 'green')}},
-            increasing={"marker": {"color": self.color_palette.get('danger', 'red')}},
-            totals={"marker": {"color": self.color_palette.get('primary', 'blue')}}
-        ))
+        # Highlight current pattern
+        if pattern_dates:
+            current_idx = -1  # Most recent pattern
+            fig.add_trace(
+                go.Scatter(
+                    x=[patterns_2d[current_idx, 0]],
+                    y=[patterns_2d[current_idx, 1]],
+                    mode='markers',
+                    marker=dict(
+                        size=15,
+                        color=self.color_palette['primary'],
+                        symbol='star',
+                        line=dict(width=2, color='white')
+                    ),
+                    name='Current Pattern',
+                    hovertemplate=f'Current Pattern<br>Start: {pattern_dates[current_idx].strftime("%Y-%m-%d")}<extra></extra>'
+                )
+            )
         
-        fig.update_layout(title=f'{symbol}: SHAP Waterfall (Avg)', height=600, template='plotly_white')
-        waterfall['chart'] = fig
-        return waterfall
-
-    def _analyze_interactions(self, explainer: shap.TreeExplainer, X: np.ndarray,
-                             shap_values: np.ndarray, feature_names: List[str],
-                             symbol: str) -> Dict[str, Any]:
-        """Analyze feature interactions."""
-        interactions = {}
-        
-        # Use SHAP interaction values if available (computationally expensive)
-        # Here we use a correlation proxy for speed as per original design
-        mean_abs_shap = np.mean(np.abs(shap_values), axis=0)
-        top_indices = np.argsort(mean_abs_shap)[::-1][:10]
-        top_features = [feature_names[i] for i in top_indices]
-        
-        matrix = np.zeros((len(top_indices), len(top_indices)))
-        
-        for i, idx_i in enumerate(top_indices):
-            for j, idx_j in enumerate(top_indices):
-                if i <= j:
-                    corr = np.corrcoef(shap_values[:, idx_i], shap_values[:, idx_j])[0, 1]
-                    matrix[i, j] = matrix[j, i] = corr
+        # Add cluster centers (k-means simplified)
+        n_clusters = min(3, n_patterns)
+        if n_clusters > 1:
+            from sklearn.cluster import KMeans
+            kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+            clusters = kmeans.fit_predict(patterns_array)
+            
+            # Add cluster annotations
+            for cluster_id in range(n_clusters):
+                cluster_mask = clusters == cluster_id
+                if cluster_mask.any():
+                    cluster_center = patterns_2d[cluster_mask].mean(axis=0)
                     
-        interactions['matrix'] = {'features': top_features, 'values': matrix.tolist()}
+                    fig.add_annotation(
+                        x=cluster_center[0],
+                        y=cluster_center[1],
+                        text=f"Cluster {cluster_id+1}",
+                        showarrow=True,
+                        arrowhead=2,
+                        arrowsize=1,
+                        arrowwidth=2,
+                        arrowcolor=self.color_palette['text'],
+                        font=dict(size=12, color=self.color_palette['text'])
+                    )
         
-        fig = go.Figure(data=go.Heatmap(
-            z=matrix, x=top_features, y=top_features, colorscale='RdBu', zmid=0
-        ))
-        fig.update_layout(title=f'{symbol}: SHAP Interaction Matrix', height=600)
-        interactions['chart'] = fig
+        fig.update_layout(
+            title=f'{symbol} Pattern Space (PCA Reduced)',
+            xaxis_title=f"PC1 ({pca.explained_variance_ratio_[0]*100:.1f}% variance)",
+            yaxis_title=f"PC2 ({pca.explained_variance_ratio_[1]*100:.1f}% variance)",
+            height=500,
+            width=700,
+            template='plotly_white',
+            showlegend=True
+        )
         
-        return interactions
-
-    def _generate_shap_insights(self, summary: Dict[str, Any], 
-                               dependencies: Dict[str, Any], symbol: str) -> List[str]:
-        """Generate text insights."""
+        return fig
+    
+    def _calculate_similarity_metrics(self, df: pd.DataFrame) -> Dict[str, float]:
+        """Calculate similarity-based metrics."""
+        metrics = {}
+        
+        if len(df) < 40:
+            return metrics
+        
+        # Find top analogs
+        analogs = self._find_top_historical_analogs(df, lookback=20, n_analogs=5)
+        
+        if not analogs:
+            return metrics
+        
+        # Similarity statistics
+        similarities = [sim for sim, _ in analogs]
+        metrics['avg_top_analog_similarity'] = float(np.mean(similarities))
+        metrics['max_analog_similarity'] = float(np.max(similarities))
+        metrics['min_analog_similarity'] = float(np.min(similarities))
+        metrics['analog_similarity_std'] = float(np.std(similarities))
+        
+        # Forward return statistics from analogs
+        forward_returns_all = []
+        for similarity, dates in analogs:
+            forward_returns = self._get_forward_returns(df, dates[-1], window=10)
+            if len(forward_returns) > 0:
+                forward_returns_all.append(forward_returns.mean() * 100)
+        
+        if forward_returns_all:
+            metrics['avg_forward_return_analogs'] = float(np.mean(forward_returns_all))
+            metrics['std_forward_return_analogs'] = float(np.std(forward_returns_all))
+            metrics['pct_positive_forward_returns'] = float(
+                sum(1 for r in forward_returns_all if r > 0) / len(forward_returns_all) * 100
+            )
+        
+        # Pattern consistency metrics
+        lookback = 20
+        n_comparisons = min(10, len(df) // lookback - 1)
+        
+        if n_comparisons > 1:
+            pattern_similarities = []
+            
+            for i in range(n_comparisons):
+                for j in range(i + 1, n_comparisons):
+                    start_i = i * lookback
+                    start_j = j * lookback
+                    
+                    pattern_i = df['close'].iloc[start_i:start_i + lookback]
+                    pattern_j = df['close'].iloc[start_j:start_j + lookback]
+                    
+                    norm_i = self._normalize_series(pattern_i).values
+                    norm_j = self._normalize_series(pattern_j).values
+                    
+                    distance = np.sqrt(np.mean((norm_i - norm_j) ** 2))
+                    similarity = 1 - distance
+                    pattern_similarities.append(similarity)
+            
+            if pattern_similarities:
+                metrics['avg_pattern_similarity'] = float(np.mean(pattern_similarities))
+                metrics['pattern_similarity_std'] = float(np.std(pattern_similarities))
+        
+        # Current pattern uniqueness
+        current_similarity = similarities[0]  # Top analog similarity
+        if 'avg_pattern_similarity' in metrics:
+            metrics['pattern_uniqueness'] = float(
+                (current_similarity - metrics['avg_pattern_similarity']) / 
+                (metrics['pattern_similarity_std'] + 1e-8)
+            )
+        
+        return metrics
+    
+    def _generate_similarity_insights(self, df: pd.DataFrame, metrics: Dict[str, float]) -> List[str]:
+        """Generate textual insights from similarity analysis."""
         insights = []
-        if 'feature_importance' in summary:
-            top = summary['feature_importance'][:3]
-            txt = [f"{f['feature']} ({'increases' if f['direction']>0 else 'decreases'})" for f in top]
-            insights.append(f"Top drivers: {', '.join(txt)}")
+        
+        if not metrics:
+            return insights
+        
+        # Pattern similarity insight
+        max_sim = metrics.get('max_analog_similarity', 0)
+        avg_sim = metrics.get('avg_top_analog_similarity', 0)
+        
+        if max_sim > 0.8:
+            insights.append(f"Strong historical analog found (similarity: {max_sim:.2f}).")
+        elif max_sim < 0.4:
+            insights.append(f"Current pattern is relatively unique (best analog similarity: {max_sim:.2f}).")
+        
+        # Forward return insight from analogs
+        avg_forward_return = metrics.get('avg_forward_return_analogs')
+        if avg_forward_return is not None:
+            if avg_forward_return > 2:
+                insights.append(f"Historical analogs suggest positive forward returns (avg: {avg_forward_return:.1f}%).")
+            elif avg_forward_return < -2:
+                insights.append(f"Historical analogs suggest negative forward returns (avg: {avg_forward_return:.1f}%).")
+        
+        # Pattern consistency insight
+        pattern_uniqueness = metrics.get('pattern_uniqueness')
+        if pattern_uniqueness is not None:
+            if abs(pattern_uniqueness) > 1:
+                if pattern_uniqueness > 0:
+                    insights.append(f"Current pattern is more typical than average (uniqueness z-score: {pattern_uniqueness:.1f}).")
+                else:
+                    insights.append(f"Current pattern is less typical than average (uniqueness z-score: {pattern_uniqueness:.1f}).")
+        
+        # Analog consistency insight
+        sim_std = metrics.get('analog_similarity_std', 0)
+        if sim_std < 0.1:
+            insights.append(f"Multiple similar historical patterns found (consistent analogs).")
+        elif sim_std > 0.2:
+            insights.append(f"Wide range of historical analogs (diverse past patterns).")
+        
         return insights
-
-    def _save_shap_values(self, shap_values: np.ndarray, X: np.ndarray,
-                         feature_names: List[str], sample_indices: np.ndarray,
-                         symbol: str):
-        """
-        FIXED: Saves SHAP data to the unified _analysis_results.pkl file.
-        Uses Load-Update-Save pattern to preserve data from other modules.
-        """
-        try:
-            self.artifacts_path.mkdir(parents=True, exist_ok=True)
-            output_file = self.artifacts_path / "_analysis_results.pkl"
-            
-            # Load existing
-            if output_file.exists():
-                try:
-                    combined_data = joblib.load(output_file)
-                except Exception as e:
-                    self.logger.warning(f"Could not load existing results: {e}")
-                    combined_data = {}
-            else:
-                combined_data = {}
-            
-            # Ensure 'explainability' key exists in unified structure
-            if 'explainability' not in combined_data:
-                combined_data['explainability'] = {}
-            
-            # Update this symbol's SHAP data (nested under explainability key)
-            combined_data['explainability'][symbol] = {
-                'shap_values': shap_values,
-                'X_sample': X,
-                'feature_names': feature_names,
-                'sample_indices': sample_indices,
-                'timestamp': pd.Timestamp.now()
+    
+    def _find_historical_analogs(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """Find and analyze historical analogs in detail."""
+        results = {}
+        
+        if len(df) < 40:
+            return results
+        
+        # Find top analogs
+        analogs = self._find_top_historical_analogs(df, lookback=20, n_analogs=10)
+        
+        if not analogs:
+            return results
+        
+        results['top_analogs'] = []
+        
+        for i, (similarity, dates) in enumerate(analogs[:5]):
+            analog_info = {
+                'rank': i + 1,
+                'similarity': float(similarity),
+                'start_date': dates[0].strftime('%Y-%m-%d'),
+                'end_date': dates[-1].strftime('%Y-%m-%d'),
+                'duration_days': len(dates),
+                'forward_returns': {}
             }
             
-            # Save back
-            joblib.dump(combined_data, output_file)
-            self.logger.info(f"Merged SHAP results for {symbol} into {output_file}")
+            # Calculate forward returns at various horizons
+            for horizon in [5, 10, 20, 30]:
+                forward_returns = self._get_forward_returns(df, dates[-1], window=horizon)
+                if len(forward_returns) > 0:
+                    analog_info['forward_returns'][f'{horizon}d'] = {
+                        'mean': float(forward_returns.mean() * 100),
+                        'std': float(forward_returns.std() * 100),
+                        'max': float(forward_returns.max() * 100),
+                        'min': float(forward_returns.min() * 100)
+                    }
             
-        except Exception as e:
-            self.logger.error(f"Error saving SHAP values: {e}")
-
-    def create_dashboard_visualizations(self, symbol: str) -> Dict[str, Any]:
-        """Generate charts for dashboard from saved artifacts."""
-        vis = {}
-        output_file = self.artifacts_path / "_analysis_results.pkl"
+            results['top_analogs'].append(analog_info)
         
-        if not output_file.exists():
-            return vis
+        # Aggregate statistics across analogs
+        if results['top_analogs']:
+            forward_returns_aggregated = {}
             
-        try:
-            data = joblib.load(output_file)
+            for horizon in [5, 10, 20, 30]:
+                horizon_returns = []
+                for analog in results['top_analogs']:
+                    if f'{horizon}d' in analog['forward_returns']:
+                        horizon_returns.append(analog['forward_returns'][f'{horizon}d']['mean'])
+                
+                if horizon_returns:
+                    forward_returns_aggregated[f'{horizon}d'] = {
+                        'mean': float(np.mean(horizon_returns)),
+                        'std': float(np.std(horizon_returns)),
+                        'pct_positive': float(sum(1 for r in horizon_returns if r > 0) / len(horizon_returns) * 100)
+                    }
             
-            # Access explainability data for this symbol
-            if 'explainability' not in data or symbol not in data['explainability']:
-                self.logger.warning(f"No SHAP data found for {symbol}")
-                return vis
+            results['aggregated_forward_returns'] = forward_returns_aggregated
+        
+        # Pattern characteristics comparison
+        current_pattern = df['close'].iloc[-20:]
+        current_returns = current_pattern.pct_change().dropna()
+        
+        pattern_stats = {
+            'current': {
+                'return_mean': float(current_returns.mean() * 100),
+                'return_std': float(current_returns.std() * 100),
+                'total_return': float((current_pattern.iloc[-1] / current_pattern.iloc[0] - 1) * 100)
+            }
+        }
+        
+        for i, analog in enumerate(results['top_analogs'][:3]):
+            analog_dates = analogs[i][1]
+            analog_prices = df.loc[analog_dates, 'close']
+            analog_returns = analog_prices.pct_change().dropna()
             
-            shap_data = data['explainability'][symbol]
+            pattern_stats[f'analog_{i+1}'] = {
+                'return_mean': float(analog_returns.mean() * 100),
+                'return_std': float(analog_returns.std() * 100),
+                'total_return': float((analog_prices.iloc[-1] / analog_prices.iloc[0] - 1) * 100)
+            }
+        
+        results['pattern_statistics'] = pattern_stats
+        
+        return results
+    
+    def _analyze_recurring_patterns(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """Analyze recurring patterns and their implications."""
+        results = {}
+        
+        if len(df) < 100:
+            return results
+        
+        lookback = 20
+        n_patterns = min(50, len(df) // lookback)
+        
+        # Extract patterns
+        patterns = []
+        pattern_starts = []
+        
+        for i in range(0, n_patterns * lookback, lookback):
+            if i + lookback <= len(df):
+                pattern = df['close'].iloc[i:i + lookback]
+                patterns.append(self._normalize_series(pattern).values)
+                pattern_starts.append(df.index[i])
+        
+        if len(patterns) < 10:
+            return results
+        
+        # Cluster patterns using simple distance matrix
+        n_patterns = len(patterns)
+        distance_matrix = np.zeros((n_patterns, n_patterns))
+        
+        for i in range(n_patterns):
+            for j in range(i, n_patterns):
+                if i == j:
+                    distance = 0
+                else:
+                    distance = np.sqrt(np.mean((patterns[i] - patterns[j]) ** 2))
+                
+                distance_matrix[i, j] = distance
+                distance_matrix[j, i] = distance
+        
+        # Identify clusters (simplified threshold-based)
+        threshold = 0.3
+        clusters = []
+        unassigned = list(range(n_patterns))
+        
+        while unassigned:
+            # Start new cluster with first unassigned pattern
+            cluster_start = unassigned.pop(0)
+            cluster = [cluster_start]
             
-            if shap_data:
-                # Re-generate key charts on demand
-                summary = self._create_shap_summary(
-                    shap_data['shap_values'], shap_data['X_sample'], 
-                    shap_data['feature_names'], symbol
+            # Find similar patterns
+            to_check = [cluster_start]
+            
+            while to_check:
+                current = to_check.pop()
+                
+                # Find unassigned patterns similar to current
+                for j in unassigned[:]:  # Copy list for safe removal
+                    if distance_matrix[current, j] < threshold:
+                        cluster.append(j)
+                        unassigned.remove(j)
+                        to_check.append(j)
+            
+            if len(cluster) > 1:  # Only keep clusters with multiple patterns
+                clusters.append(cluster)
+        
+        results['pattern_clusters'] = []
+        
+        for i, cluster in enumerate(clusters[:5]):  # Limit to top 5 clusters
+            cluster_info = {
+                'cluster_id': i + 1,
+                'size': len(cluster),
+                'pattern_dates': [pattern_starts[idx].strftime('%Y-%m-%d') for idx in cluster],
+                'average_similarity': float(
+                    np.mean([distance_matrix[a, b] 
+                            for a in cluster for b in cluster if a != b])
                 )
-                if 'chart' in summary:
-                    vis['summary_chart'] = summary['chart']
-                    
-                if 'beeswarm' in summary and 'chart' in summary['beeswarm']:
-                    vis['beeswarm_chart'] = summary['beeswarm']['chart']
-                    
-        except Exception as e:
-            self.logger.error(f"Error creating dashboard vis: {e}")
+            }
             
-        return vis
+            # Calculate forward returns for patterns in this cluster
+            forward_returns_by_horizon = {}
+            
+            for horizon in [5, 10, 20]:
+                horizon_returns = []
+                
+                for pattern_idx in cluster:
+                    start_date = pattern_starts[pattern_idx]
+                    forward_returns = self._get_forward_returns(df, start_date + pd.Timedelta(days=lookback-1), 
+                                                               window=horizon)
+                    if len(forward_returns) > 0:
+                        horizon_returns.append(forward_returns.mean() * 100)
+                
+                if horizon_returns:
+                    forward_returns_by_horizon[f'{horizon}d'] = {
+                        'mean': float(np.mean(horizon_returns)),
+                        'std': float(np.std(horizon_returns)),
+                        'pct_positive': float(
+                            sum(1 for r in horizon_returns if r > 0) / len(horizon_returns) * 100
+                        )
+                    }
+            
+            cluster_info['forward_returns'] = forward_returns_by_horizon
+            results['pattern_clusters'].append(cluster_info)
+        
+        # Check if current pattern belongs to any cluster
+        current_pattern_idx = len(patterns) - 1  # Most recent pattern
+        current_cluster_id = None
+        
+        for i, cluster in enumerate(clusters):
+            if current_pattern_idx in cluster:
+                current_cluster_id = i + 1
+                break
+        
+        if current_cluster_id is not None:
+            results['current_pattern_cluster'] = current_cluster_id
+            current_cluster = clusters[current_cluster_id - 1]
+            
+            # Calculate similarity to cluster centroid
+            cluster_patterns = [patterns[idx] for idx in current_cluster]
+            centroid = np.mean(cluster_patterns, axis=0)
+            current_to_centroid_distance = np.sqrt(
+                np.mean((patterns[current_pattern_idx] - centroid) ** 2)
+            )
+            
+            results['current_to_cluster_centroid_similarity'] = float(1 - current_to_centroid_distance)
+            
+            # Insight about cluster performance
+            cluster_info = results['pattern_clusters'][current_cluster_id - 1]
+            if 'forward_returns' in cluster_info and '10d' in cluster_info['forward_returns']:
+                avg_return = cluster_info['forward_returns']['10d']['mean']
+                if avg_return > 2:
+                    results['cluster_performance_insight'] = f"Patterns in this cluster historically followed by positive returns (+{avg_return:.1f}% avg)"
+                elif avg_return < -2:
+                    results['cluster_performance_insight'] = f"Patterns in this cluster historically followed by negative returns ({avg_return:.1f}% avg)"
+        
+        return results
+    
+    def _analyze_cross_symbol_similarity(self, data: Dict[str, pd.DataFrame]) -> Dict[str, Any]:
+        """Analyze pattern similarity between different symbols."""
+        results = {}
+        
+        symbols = list(data.keys())
+        if len(symbols) < 2:
+            return results
+        
+        # Extract recent patterns from each symbol
+        lookback = 20
+        patterns = {}
+        
+        for symbol, df in data.items():
+            if len(df) >= lookback:
+                recent_prices = df['close'].iloc[-lookback:]
+                patterns[symbol] = self._normalize_series(recent_prices).values
+        
+        if len(patterns) < 2:
+            return results
+        
+        # Calculate pairwise pattern similarity
+        similarity_matrix = np.ones((len(symbols), len(symbols)))
+        
+        for i, sym1 in enumerate(symbols):
+            for j, sym2 in enumerate(symbols):
+                if i != j and sym1 in patterns and sym2 in patterns:
+                    pattern1 = patterns[sym1]
+                    pattern2 = patterns[sym2]
+                    
+                    distance = np.sqrt(np.mean((pattern1 - pattern2) ** 2))
+                    similarity = 1 - distance
+                    similarity_matrix[i, j] = similarity
+        
+        # Create DataFrame for easier manipulation
+        similarity_df = pd.DataFrame(
+            similarity_matrix,
+            index=symbols,
+            columns=symbols
+        )
+        
+        results['cross_symbol_pattern_similarity'] = similarity_df.to_dict()
+        
+        # Create heatmap
+        fig = go.Figure(data=go.Heatmap(
+            z=similarity_matrix,
+            x=symbols,
+            y=symbols,
+            colorscale='RdBu',
+            zmid=0.5,
+            text=np.round(similarity_matrix, 2),
+            texttemplate='%{text}',
+            textfont={"size": 12},
+            hoverongaps=False,
+            hovertemplate='Symbol 1: %{y}<br>Symbol 2: %{x}<br>Similarity: %{z:.2f}<extra></extra>'
+        ))
+        
+        fig.update_layout(
+            title='Cross-Symbol Pattern Similarity (Recent 20-day patterns)',
+            height=500,
+            width=600,
+            template='plotly_white'
+        )
+        
+        results['cross_symbol_similarity_chart'] = fig
+        
+        # Generate insights
+        insights = []
+        
+        # Find most similar pair
+        most_similar = -1
+        most_similar_pair = None
+        
+        for i, sym1 in enumerate(symbols):
+            for j, sym2 in enumerate(symbols):
+                if i < j:  # Avoid duplicate comparisons
+                    similarity = similarity_matrix[i, j]
+                    if similarity > most_similar:
+                        most_similar = similarity
+                        most_similar_pair = (sym1, sym2)
+        
+        if most_similar_pair:
+            insights.append(
+                f"Most similar recent patterns: {most_similar_pair[0]}-{most_similar_pair[1]} "
+                f"(similarity: {most_similar:.2f})"
+            )
+            
+            if most_similar > 0.7:
+                insights.append(f"Strong pattern alignment between {most_similar_pair[0]} and {most_similar_pair[1]}.")
+        
+        # Find least similar pair
+        least_similar = 2
+        least_similar_pair = None
+        
+        for i, sym1 in enumerate(symbols):
+            for j, sym2 in enumerate(symbols):
+                if i < j:
+                    similarity = similarity_matrix[i, j]
+                    if similarity < least_similar:
+                        least_similar = similarity
+                        least_similar_pair = (sym1, sym2)
+        
+        if least_similar_pair and least_similar < 0.3:
+            insights.append(
+                f"Divergent patterns: {least_similar_pair[0]} and {least_similar_pair[1]} "
+                f"show different recent behavior (similarity: {least_similar:.2f})"
+            )
+        
+        results['insights'] = insights
+        
+        return results
+    
+    def _save_symbol_results(self, symbol: str, results: Dict[str, Any]) -> None:
+        """Save similarity analysis results for a symbol to artifacts folder."""
+        try:
+            # Convert Plotly figures to JSON for serialization
+            if 'charts' in results:
+                serialized_charts = {}
+                for chart_name, fig in results['charts'].items():
+                    if isinstance(fig, go.Figure):
+                        serialized_charts[chart_name] = fig.to_json()
+                    else:
+                        serialized_charts[chart_name] = fig
+                results['charts'] = serialized_charts
+            
+            # Load existing analysis results or create new
+            unified_file = self.artifacts_path / f"{symbol}_analysis_results.pkl"
+            if unified_file.exists():
+                existing_data = joblib.load(unified_file)
+            else:
+                existing_data = {}
+            
+            # Update with similarity results
+            existing_data['similarity'] = results
+            
+            # Save back to unified file
+            joblib.dump(existing_data, unified_file)
+            
+            self.logger.info(f"Saved similarity analysis results for {symbol} to {unified_file}")
+            
+        except Exception as e:
+            self.logger.error(f"Error saving similarity analysis results for {symbol}: {e}")

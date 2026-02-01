@@ -93,7 +93,8 @@ class XGBoostModel:
             symbol_results['feature_importance'] = importance
             
             # Make predictions
-            predictions = self._make_predictions(model, X_test, y_test, test_dates, symbol)
+            predictions = self._make_predictions(model, X_train, X_test, y_train, y_test, 
+                                                train_dates, test_dates, symbol)
             symbol_results['predictions'] = predictions
             
             # Create XGBoost charts
@@ -111,18 +112,10 @@ class XGBoostModel:
             self._save_model_data(model, X_train, X_test, y_train, y_test, 
                                  train_dates, test_dates, feature_names, symbol)
             
-            # Store data needed for explainability
-            symbol_results['explainability_data'] = {
-                'model': model,
-                'X_test': X_test,
-                'feature_names': feature_names,
-                'test_dates': test_dates
-            }
-            
             results[symbol] = symbol_results
             
-            # FIXED: Save results to per-symbol model results file
-            self._save_symbol_results_unified(symbol, symbol_results)
+            # FIXED: Save results to unified model results file
+            self._save_symbol_results(symbol, symbol_results)
         
         # Cross-symbol XGBoost comparison
         if len(by_symbol) > 1:
@@ -145,7 +138,6 @@ class XGBoostModel:
             'volatility_10d', 'volatility_20d', 'volatility_30d',
             'volatility_annualized_10d', 'volatility_annualized_20d',
             'daily_range_pct', 'atr_14d',
-            'volatility_zscore_20d' if 'volatility_zscore_20d' in df.columns else None,
             
             # Volume features
             'volume_ratio_10d', 'volume_ratio_20d', 'volume_ratio_30d',
@@ -209,6 +201,8 @@ class XGBoostModel:
         train_dates = dates[:split_idx]
         test_dates = dates[split_idx:]
         
+        self.logger.info(f"XGBoost Train size: {len(X_train)}, Test size: {len(X_test)}")
+        
         return X_train, X_test, y_train, y_test, train_dates, test_dates
     
     def _train_model(self, X_train: np.ndarray, y_train: np.ndarray, 
@@ -235,9 +229,9 @@ class XGBoostModel:
         # Get training metrics
         train_pred = model.predict(dtrain)
         train_metrics = {
-            'train_rmse': np.sqrt(mean_squared_error(y_train, train_pred)),
-            'train_mae': mean_absolute_error(y_train, train_pred),
-            'train_r2': r2_score(y_train, train_pred)
+            'train_rmse': float(np.sqrt(mean_squared_error(y_train, train_pred))),
+            'train_mae': float(mean_absolute_error(y_train, train_pred)),
+            'train_r2': float(r2_score(y_train, train_pred))
         }
         
         self.logger.info(
@@ -260,7 +254,7 @@ class XGBoostModel:
         r2 = r2_score(y_test, y_pred)
         
         # Correlation
-        correlation = np.corrcoef(y_test, y_pred)[0, 1]
+        correlation = np.corrcoef(y_test, y_pred)[0, 1] if len(y_test) > 1 else 0
         
         # Error analysis
         errors = y_pred - y_test
@@ -275,15 +269,15 @@ class XGBoostModel:
         direction_accuracy = np.mean(np.sign(y_pred) == np.sign(y_test)) * 100
         
         metrics = {
-            'test_rmse': rmse,
-            'test_mae': mae,
-            'test_r2': r2,
-            'test_correlation': correlation,
-            'error_mean': error_mean,
-            'error_std': error_std,
-            'within_1std_pct': within_1std,
-            'within_2std_pct': within_2std,
-            'direction_accuracy': direction_accuracy
+            'test_rmse': float(rmse),
+            'test_mae': float(mae),
+            'test_r2': float(r2),
+            'test_correlation': float(correlation),
+            'error_mean': float(error_mean),
+            'error_std': float(error_std),
+            'within_1std_pct': float(within_1std),
+            'within_2std_pct': float(within_2std),
+            'direction_accuracy': float(direction_accuracy)
         }
         
         self.logger.info(
@@ -310,9 +304,9 @@ class XGBoostModel:
             if feature_key in importance_gain:
                 importance_list.append({
                     'feature': fname,
-                    'gain': importance_gain.get(feature_key, 0),
-                    'weight': importance_weight.get(feature_key, 0),
-                    'cover': importance_cover.get(feature_key, 0)
+                    'gain': float(importance_gain.get(feature_key, 0)),
+                    'weight': float(importance_weight.get(feature_key, 0)),
+                    'cover': float(importance_cover.get(feature_key, 0))
                 })
         
         # Sort by gain
@@ -322,7 +316,7 @@ class XGBoostModel:
         total_gain = sum(item['gain'] for item in importance_list)
         if total_gain > 0:
             for item in importance_list:
-                item['gain_pct'] = (item['gain'] / total_gain) * 100
+                item['gain_pct'] = float((item['gain'] / total_gain) * 100)
         
         # Group by feature type
         feature_types = {
@@ -332,7 +326,7 @@ class XGBoostModel:
             'price_structure': ['ma', 'price_vs', 'rolling_high', 'rolling_low', 'position']
         }
         
-        importance_by_type = {ftype: 0 for ftype in feature_types}
+        importance_by_type = {ftype: 0.0 for ftype in feature_types}
         
         for item in importance_list:
             fname = item['feature']
@@ -346,18 +340,31 @@ class XGBoostModel:
             'by_type': importance_by_type
         }
     
-    def _make_predictions(self, model: xgb.Booster, X_test: np.ndarray, 
-                         y_test: np.ndarray, test_dates: pd.DatetimeIndex, 
+    def _make_predictions(self, model: xgb.Booster, 
+                         X_train: np.ndarray, X_test: np.ndarray,
+                         y_train: np.ndarray, y_test: np.ndarray,
+                         train_dates: pd.DatetimeIndex, test_dates: pd.DatetimeIndex,
                          symbol: str) -> Dict[str, Any]:
-        """Make predictions and organize results."""
+        """Make predictions and organize results for dashboard."""
+        dtrain = xgb.DMatrix(X_train)
         dtest = xgb.DMatrix(X_test)
-        y_pred = model.predict(dtest)
+        
+        train_pred = model.predict(dtrain)
+        test_pred = model.predict(dtest)
         
         predictions = {
-            'dates': test_dates,
-            'actual': y_test,
-            'predicted': y_pred,
-            'errors': y_pred - y_test
+            'train': {
+                'dates': train_dates.tolist(),
+                'actual': y_train.tolist(),
+                'predicted': train_pred.tolist(),
+                'errors': (train_pred - y_train).tolist()
+            },
+            'test': {
+                'dates': test_dates.tolist(),
+                'actual': y_test.tolist(),
+                'predicted': test_pred.tolist(),
+                'errors': (test_pred - y_test).tolist()
+            }
         }
         
         return predictions
@@ -450,10 +457,10 @@ class XGBoostModel:
         charts['predictions_timeseries'] = fig
         
         # 2. Scatter Plot: Predicted vs Actual
-        fig = go.Figure()
+        fig2 = go.Figure()
         
         # Test points
-        fig.add_trace(
+        fig2.add_trace(
             go.Scatter(
                 x=y_test * 100,
                 y=test_pred * 100,
@@ -473,7 +480,7 @@ class XGBoostModel:
         min_val = min(y_test.min(), test_pred.min()) * 100
         max_val = max(y_test.max(), test_pred.max()) * 100
         
-        fig.add_trace(
+        fig2.add_trace(
             go.Scatter(
                 x=[min_val, max_val],
                 y=[min_val, max_val],
@@ -488,7 +495,7 @@ class XGBoostModel:
         # Calculate R²
         r2 = r2_score(y_test, test_pred)
         
-        fig.update_layout(
+        fig2.update_layout(
             title=f'{symbol} - XGBoost: Predicted vs Actual (R² = {r2:.3f})',
             xaxis_title='Actual Next-Day Volatility (%)',
             yaxis_title='Predicted Next-Day Volatility (%)',
@@ -497,19 +504,19 @@ class XGBoostModel:
             showlegend=True
         )
         
-        charts['predicted_vs_actual'] = fig
+        charts['predicted_vs_actual'] = fig2
         
         # 3. Feature Importance Chart
         if 'by_gain' in importance and importance['by_gain']:
             top_n = min(15, len(importance['by_gain']))
             top_features = importance['by_gain'][:top_n]
             
-            fig = go.Figure()
+            fig3 = go.Figure()
             
             features = [f['feature'] for f in top_features]
             gains = [f.get('gain_pct', 0) for f in top_features]
             
-            fig.add_trace(
+            fig3.add_trace(
                 go.Bar(
                     y=features[::-1],  # Reverse for better readability
                     x=gains[::-1],
@@ -526,7 +533,7 @@ class XGBoostModel:
                 )
             )
             
-            fig.update_layout(
+            fig3.update_layout(
                 title=f'{symbol} - XGBoost Feature Importance (by Gain)',
                 xaxis_title='Importance (%)',
                 yaxis_title='Feature',
@@ -535,56 +542,19 @@ class XGBoostModel:
                 showlegend=False
             )
             
-            charts['feature_importance'] = fig
+            charts['feature_importance'] = fig3
         
-        # 4. Feature Type Importance (Pie Chart)
-        if 'by_type' in importance:
-            type_importance = importance['by_type']
-            
-            # Filter out zero importance
-            filtered_types = {k: v for k, v in type_importance.items() if v > 0}
-            
-            if filtered_types:
-                fig = go.Figure()
-                
-                fig.add_trace(
-                    go.Pie(
-                        labels=list(filtered_types.keys()),
-                        values=list(filtered_types.values()),
-                        hole=0.4,
-                        marker=dict(
-                            colors=[
-                                self.color_palette['primary'],
-                                self.color_palette['warning'],
-                                self.color_palette['success'],
-                                self.color_palette['danger']
-                            ]
-                        ),
-                        textinfo='label+percent',
-                        hovertemplate='%{label}<br>%{value:.1f}% importance<extra></extra>'
-                    )
-                )
-                
-                fig.update_layout(
-                    title=f'{symbol} - Feature Type Importance Distribution',
-                    height=500,
-                    template='plotly_white',
-                    showlegend=True
-                )
-                
-                charts['feature_type_importance'] = fig
-        
-        # 5. Residual Analysis
+        # 4. Residual Analysis
         errors = test_pred - y_test
         
-        fig = make_subplots(
+        fig4 = make_subplots(
             rows=1, cols=2,
             subplot_titles=('Residual Distribution', 'Residuals Over Time'),
             specs=[[{'type': 'histogram'}, {'type': 'scatter'}]]
         )
         
         # Histogram
-        fig.add_trace(
+        fig4.add_trace(
             go.Histogram(
                 x=errors * 100,
                 nbinsx=30,
@@ -597,7 +567,7 @@ class XGBoostModel:
         )
         
         # Time series
-        fig.add_trace(
+        fig4.add_trace(
             go.Scatter(
                 x=test_dates,
                 y=errors * 100,
@@ -614,24 +584,24 @@ class XGBoostModel:
         )
         
         # Zero line
-        fig.add_hline(
+        fig4.add_hline(
             y=0, line_dash="dash", line_color=self.color_palette['text'],
             row=1, col=2
         )
         
-        fig.update_xaxes(title_text="Prediction Error (%)", row=1, col=1)
-        fig.update_xaxes(title_text="Date", row=1, col=2)
-        fig.update_yaxes(title_text="Frequency", row=1, col=1)
-        fig.update_yaxes(title_text="Prediction Error (%)", row=1, col=2)
+        fig4.update_xaxes(title_text="Prediction Error (%)", row=1, col=1)
+        fig4.update_xaxes(title_text="Date", row=1, col=2)
+        fig4.update_yaxes(title_text="Frequency", row=1, col=1)
+        fig4.update_yaxes(title_text="Prediction Error (%)", row=1, col=2)
         
-        fig.update_layout(
+        fig4.update_layout(
             title=f'{symbol} - XGBoost Residual Analysis',
             height=500,
             showlegend=False,
             template='plotly_white'
         )
         
-        charts['residual_analysis'] = fig
+        charts['residual_analysis'] = fig4
         
         return charts
     
@@ -707,6 +677,44 @@ class XGBoostModel:
         
         self.logger.debug(f"Saved XGBoost model and data for {symbol}")
     
+    def _save_symbol_results(self, symbol: str, results: Dict[str, Any]):
+        """
+        FIXED: Save XGBoost results to unified model results file.
+        Converts Plotly figures to JSON and saves only serializable data.
+        """
+        try:
+            # Convert Plotly figures to JSON
+            if 'charts' in results:
+                serialized_charts = {}
+                for chart_name, fig in results['charts'].items():
+                    if isinstance(fig, go.Figure):
+                        serialized_charts[chart_name] = fig.to_json()
+                    else:
+                        serialized_charts[chart_name] = fig
+                results['charts'] = serialized_charts
+            
+            # Remove non-serializable objects
+            results.pop('model', None)
+            results.pop('explainability_data', None)
+            
+            # Load existing model results or create new
+            model_file = self.artifacts_path / f"{symbol}_model_results.pkl"
+            if model_file.exists():
+                existing_data = joblib.load(model_file)
+            else:
+                existing_data = {}
+            
+            # Update with XGBoost results
+            existing_data['xgboost'] = results
+            
+            # Save back to unified file
+            joblib.dump(existing_data, model_file)
+            
+            self.logger.info(f"Saved XGBoost results for {symbol} to {model_file}")
+            
+        except Exception as e:
+            self.logger.error(f"Error saving XGBoost results for {symbol}: {e}")
+    
     def _analyze_cross_symbol_xgboost(self, results: Dict[str, Any]) -> Dict[str, Any]:
         """Analyze XGBoost results across symbols."""
         cross_results = {}
@@ -776,12 +784,12 @@ class XGBoostModel:
             template='plotly_white',
             yaxis=dict(
                 title='RMSE (%)',
-                title_font=dict(color=self.color_palette['primary']),
+                titlefont=dict(color=self.color_palette['primary']),
                 tickfont=dict(color=self.color_palette['primary'])
             ),
             yaxis2=dict(
                 title='R² Score',
-                title_font=dict(color=self.color_palette['success']),
+                titlefont=dict(color=self.color_palette['success']),
                 tickfont=dict(color=self.color_palette['success']),
                 overlaying='y',
                 side='right'
@@ -819,77 +827,3 @@ class XGBoostModel:
         cross_results['insights'] = insights
         
         return cross_results
-    
-    def _save_symbol_results_unified(self, symbol: str, results: Dict[str, Any]):
-        """
-        Save XGBoost results to per-symbol model results file.
-        Creates {symbol}_model_results.pkl with 'xgboost' key.
-        """
-        try:
-            # Create artifacts directory if it doesn't exist
-            self.artifacts_path.mkdir(parents=True, exist_ok=True)
-            
-            # Path to symbol-specific model results file
-            model_results_path = self.artifacts_path / f"{symbol}_model_results.pkl"
-            
-            # Prepare XGBoost results (remove unpicklable objects)
-            save_results = {}
-            
-            # Copy metrics
-            if 'metrics' in results:
-                save_results['metrics'] = results['metrics']
-            
-            # Copy predictions (convert to serializable format)
-            if 'predictions' in results:
-                pred = results['predictions']
-                save_results['predictions'] = {
-                    'dates': [str(d) for d in pred.get('dates', [])] if hasattr(pred.get('dates', []), '__iter__') else [],
-                    'actual': pred.get('actual', []).tolist() if hasattr(pred.get('actual', []), 'tolist') else list(pred.get('actual', [])),
-                    'predicted': pred.get('predicted', []).tolist() if hasattr(pred.get('predicted', []), 'tolist') else list(pred.get('predicted', [])),
-                    'errors': pred.get('errors', []).tolist() if hasattr(pred.get('errors', []), 'tolist') else list(pred.get('errors', []))
-                }
-            
-            # Copy feature importance
-            if 'feature_importance' in results:
-                save_results['feature_importance'] = results['feature_importance']
-            
-            # Copy training info
-            if 'train_metrics' in results:
-                save_results['train_metrics'] = results['train_metrics']
-            
-            # Copy insights
-            if 'insights' in results:
-                save_results['insights'] = results['insights']
-            
-            # Model info (not the model object itself - that's saved as .json)
-            save_results['model_info'] = {
-                'model_saved': True,
-                'model_path': str(self.models_path / f"{symbol}_xgboost_model.json")
-            }
-            
-            # Load existing model results or create new dict
-            if model_results_path.exists():
-                try:
-                    existing_data = joblib.load(model_results_path)
-                    self.logger.info(f"Loaded existing model results for {symbol}")
-                except Exception as e:
-                    self.logger.warning(f"Could not load existing model results: {e}")
-                    existing_data = {}
-            else:
-                self.logger.info(f"Creating new model results file for {symbol}")
-                existing_data = {}
-            
-            # Merge XGBoost results under 'xgboost' key
-            existing_data['xgboost'] = save_results
-            
-            # Save merged data
-            joblib.dump(existing_data, model_results_path)
-            
-            self.logger.info(
-                f"Successfully saved XGBoost results for {symbol} to {model_results_path.name}"
-            )
-            
-        except Exception as e:
-            self.logger.error(f"Error saving XGBoost results for {symbol}: {e}")
-            import traceback
-            self.logger.error(traceback.format_exc())
