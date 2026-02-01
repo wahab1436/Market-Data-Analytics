@@ -1,6 +1,7 @@
 """
 Dashboard Application - Plotly Dash Interface
 Professional market analytics dashboard with comprehensive data visualization
+FIXED: Properly connected with layout and callbacks files
 """
 
 import dash
@@ -12,6 +13,7 @@ from typing import Dict, Any
 import yaml
 import logging
 
+# FIXED: Import from the correct module paths
 from .layout import create_layout
 from .callbacks import register_callbacks
 
