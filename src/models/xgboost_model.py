@@ -121,7 +121,7 @@ class XGBoostModel:
             
             results[symbol] = symbol_results
             
-            # FIXED: Save results to unified _analysis_results.pkl with proper merging
+            # FIXED: Save results to per-symbol model results file
             self._save_symbol_results_unified(symbol, symbol_results)
         
         # Cross-symbol XGBoost comparison
@@ -776,12 +776,12 @@ class XGBoostModel:
             template='plotly_white',
             yaxis=dict(
                 title='RMSE (%)',
-                titlefont=dict(color=self.color_palette['primary']),
+                title_font=dict(color=self.color_palette['primary']),
                 tickfont=dict(color=self.color_palette['primary'])
             ),
             yaxis2=dict(
                 title='R² Score',
-                titlefont=dict(color=self.color_palette['success']),
+                title_font=dict(color=self.color_palette['success']),
                 tickfont=dict(color=self.color_palette['success']),
                 overlaying='y',
                 side='right'
@@ -822,56 +822,74 @@ class XGBoostModel:
     
     def _save_symbol_results_unified(self, symbol: str, results: Dict[str, Any]):
         """
-        FIXED METHOD: Save results to unified _analysis_results.pkl with proper merging.
-        
-        This method:
-        1. Loads existing _analysis_results.pkl if it exists
-        2. Merges XGBoost results into the 'xgboost' key
-        3. Saves back to _analysis_results.pkl without overwriting other modules
+        Save XGBoost results to per-symbol model results file.
+        Creates {symbol}_model_results.pkl with 'xgboost' key.
         """
         try:
-            # Path to unified results file
-            unified_results_path = self.artifacts_path / "_analysis_results.pkl"
+            # Create artifacts directory if it doesn't exist
+            self.artifacts_path.mkdir(parents=True, exist_ok=True)
             
-            # Load existing results or create new dict
-            if unified_results_path.exists():
+            # Path to symbol-specific model results file
+            model_results_path = self.artifacts_path / f"{symbol}_model_results.pkl"
+            
+            # Prepare XGBoost results (remove unpicklable objects)
+            save_results = {}
+            
+            # Copy metrics
+            if 'metrics' in results:
+                save_results['metrics'] = results['metrics']
+            
+            # Copy predictions (convert to serializable format)
+            if 'predictions' in results:
+                pred = results['predictions']
+                save_results['predictions'] = {
+                    'dates': [str(d) for d in pred.get('dates', [])] if hasattr(pred.get('dates', []), '__iter__') else [],
+                    'actual': pred.get('actual', []).tolist() if hasattr(pred.get('actual', []), 'tolist') else list(pred.get('actual', [])),
+                    'predicted': pred.get('predicted', []).tolist() if hasattr(pred.get('predicted', []), 'tolist') else list(pred.get('predicted', [])),
+                    'errors': pred.get('errors', []).tolist() if hasattr(pred.get('errors', []), 'tolist') else list(pred.get('errors', []))
+                }
+            
+            # Copy feature importance
+            if 'feature_importance' in results:
+                save_results['feature_importance'] = results['feature_importance']
+            
+            # Copy training info
+            if 'train_metrics' in results:
+                save_results['train_metrics'] = results['train_metrics']
+            
+            # Copy insights
+            if 'insights' in results:
+                save_results['insights'] = results['insights']
+            
+            # Model info (not the model object itself - that's saved as .json)
+            save_results['model_info'] = {
+                'model_saved': True,
+                'model_path': str(self.models_path / f"{symbol}_xgboost_model.json")
+            }
+            
+            # Load existing model results or create new dict
+            if model_results_path.exists():
                 try:
-                    existing_data = joblib.load(unified_results_path)
-                    self.logger.info(f"Loaded existing _analysis_results.pkl")
+                    existing_data = joblib.load(model_results_path)
+                    self.logger.info(f"Loaded existing model results for {symbol}")
                 except Exception as e:
-                    self.logger.warning(f"Could not load existing results, creating new: {e}")
+                    self.logger.warning(f"Could not load existing model results: {e}")
                     existing_data = {}
             else:
-                self.logger.info(f"Creating new _analysis_results.pkl")
+                self.logger.info(f"Creating new model results file for {symbol}")
                 existing_data = {}
             
-            # Ensure 'xgboost' key exists in the unified structure
-            if 'xgboost' not in existing_data:
-                existing_data['xgboost'] = {}
+            # Merge XGBoost results under 'xgboost' key
+            existing_data['xgboost'] = save_results
             
-            # Prepare XGBoost results for this symbol (remove unpicklable objects)
-            save_results = results.copy()
-            
-            # Remove model object (already saved separately as .json)
-            if 'model' in save_results:
-                del save_results['model']
-            
-            # Remove explainability data (already saved separately)
-            if 'explainability_data' in save_results:
-                del save_results['explainability_data']
-            
-            # Merge this symbol's XGBoost results into the unified structure
-            existing_data['xgboost'][symbol] = save_results
-            
-            # Save back to unified file
-            joblib.dump(existing_data, unified_results_path)
+            # Save merged data
+            joblib.dump(existing_data, model_results_path)
             
             self.logger.info(
-                f"Successfully merged XGBoost results for {symbol} into _analysis_results.pkl "
-                f"under key 'xgboost'"
+                f"Successfully saved XGBoost results for {symbol} to {model_results_path.name}"
             )
             
         except Exception as e:
-            self.logger.error(f"Error saving unified XGBoost results for {symbol}: {str(e)}")
+            self.logger.error(f"Error saving XGBoost results for {symbol}: {e}")
             import traceback
             self.logger.error(traceback.format_exc())
