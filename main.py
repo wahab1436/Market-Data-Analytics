@@ -2,15 +2,15 @@
 """
 Market Insight Platform - Main Entry Point
 Local-First MVP | Batch-Driven Analytics
-FIXED: Updated to work with corrected analysis and model modules
+Optimized for compact API output (100 days)
+FIXED: Proper handling of nested feature data structure
 """
 
 import argparse
 import sys
 import yaml
-import pandas as pd  # ADDED: Missing import
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -26,6 +26,8 @@ from src.analysis.similarity_analysis import SimilarityAnalysis
 from src.models.regression import RegressionModels
 from src.models.knn_similarity import KNNSimilarity
 from src.models.xgboost_model import XGBoostModel
+from src.models.explainability import ModelExplainability
+from src.dashboard.app import create_app
 
 
 class MarketInsightPlatform:
@@ -43,7 +45,7 @@ class MarketInsightPlatform:
         
         # Initialize paths
         self.setup_directories()
-        
+    
     def load_config(self, config_path: str) -> Dict[str, Any]:
         """Load configuration from YAML file with proper encoding."""
         try:
@@ -149,14 +151,13 @@ class MarketInsightPlatform:
                 sys.exit(1)
             
             # =====================================================================
-            # FIXED: Access symbols directly from features_data (no nested 'by_symbol')
+            # FIX: Access by_symbol from nested structure
             # =====================================================================
             # Verify we have enough data for modeling
             data_summary = {}
-            for symbol, df in features_data.items():  # CHANGED: features_data directly, not features_data['by_symbol']
-                if isinstance(df, pd.DataFrame):  # FIXED: Now pd is defined
-                    data_summary[symbol] = len(df)
-                    self.logger.info(f"{symbol}: {len(df)} records after feature engineering")
+            for symbol, df in features_data['by_symbol'].items():
+                data_summary[symbol] = len(df)
+                self.logger.info(f"{symbol}: {len(df)} records after feature engineering")
             
             # Provide helpful warnings based on data availability
             min_records = min(data_summary.values()) if data_summary else 0
@@ -185,7 +186,6 @@ class MarketInsightPlatform:
             for name, analyzer in analyses.items():
                 self.logger.info(f"Running {name} analysis")
                 try:
-                    # FIXED: Pass features_data directly (no nested structure expected)
                     analysis_results[name] = analyzer.analyze(features_data)
                 except Exception as e:
                     self.logger.warning(f"{name} analysis failed: {e}")
@@ -198,7 +198,6 @@ class MarketInsightPlatform:
             reg_results = {}
             try:
                 reg_models = RegressionModels(self.config, self.logger)
-                # FIXED: Pass features_data directly
                 reg_results = reg_models.train_and_evaluate(features_data)
             except Exception as e:
                 self.logger.warning(f"Regression training failed: {e}")
@@ -207,7 +206,6 @@ class MarketInsightPlatform:
             knn_results = {}
             try:
                 knn_model = KNNSimilarity(self.config, self.logger)
-                # FIXED: Pass features_data directly
                 knn_results = knn_model.train_and_evaluate(features_data)
             except Exception as e:
                 self.logger.warning(f"KNN training failed: {e}")
@@ -216,15 +214,27 @@ class MarketInsightPlatform:
             xgb_results = {}
             try:
                 xgb_model = XGBoostModel(self.config, self.logger)
-                # FIXED: Pass features_data directly
                 xgb_results = xgb_model.train_and_evaluate(features_data)
             except Exception as e:
                 self.logger.warning(f"XGBoost training failed: {e}")
             
-            # 6. Explainability (Handled within models now - removed problematic code)
-            self.logger.info("Step 6: Model Explainability - Skipped (handled within models)")
+            # 6. Explainability
+            self.logger.info("Step 6: Model Explainability")
+            
+            # Only run explainability if XGBoost trained successfully
             explainability_results = {}
-            # FIXED: Removed problematic explainability code that expected old data structure
+            if xgb_results and 'model' in xgb_results and xgb_results.get('model') is not None:
+                try:
+                    explainer = ModelExplainability(self.config, self.logger)
+                    explainability_results = explainer.compute_shap(
+                        xgb_results['model'],
+                        xgb_results['X_test'],
+                        xgb_results['feature_names']
+                    )
+                except Exception as e:
+                    self.logger.warning(f"Explainability computation failed: {e}")
+            else:
+                self.logger.warning("Skipping explainability - no trained XGBoost models available")
             
             self.logger.info("Batch pipeline completed successfully")
             
@@ -237,13 +247,7 @@ class MarketInsightPlatform:
             for symbol, count in data_summary.items():
                 self.logger.info(f"  - {symbol}: {count} records")
             self.logger.info(f"Analysis modules completed: {len([r for r in analysis_results.values() if r])}/4")
-            
-            # FIXED: Check if models returned results for any symbols
-            reg_trained = any(len(v) > 0 for v in reg_results.values()) if reg_results else False
-            knn_trained = any(len(v) > 0 for v in knn_results.values()) if knn_results else False
-            xgb_trained = any(len(v) > 0 for v in xgb_results.values()) if xgb_results else False
-            
-            self.logger.info(f"Models trained: Regression={reg_trained}, KNN={knn_trained}, XGBoost={xgb_trained}")
+            self.logger.info(f"Models trained: Regression={bool(reg_results)}, KNN={bool(knn_results)}, XGBoost={bool(xgb_results)}")
             self.logger.info("=" * 60)
             
             # Provide recommendations based on results
@@ -263,7 +267,7 @@ class MarketInsightPlatform:
                 },
                 'explainability': explainability_results
             }
-            
+        
         except Exception as e:
             self.logger.error(f"Batch pipeline failed: {e}")
             raise
@@ -331,7 +335,7 @@ class MarketInsightPlatform:
         print("=" * 60)
         print(f"Market Insight Platform v{self.config['project']['version']}")
         print("=" * 60)
-        print(f"Mode: {mode.upper()}")
+        print(f"Mode: {mode.UPPER()}")
         print(f"Symbols: {', '.join(self.config['data']['symbols'])}")
         print(f"Date Range: {self.config['data']['date_range']['start']} to {self.config['data']['date_range']['end']}")
         print(f"API Output: {self.config.get('data', {}).get('api', {}).get('outputsize', 'unknown')}")
@@ -358,10 +362,10 @@ def main():
 Examples:
   # Run batch pipeline to fetch and process data
   python main.py --mode batch
-  
+
   # Start dashboard to visualize data
   python main.py --mode dashboard
-  
+
   # Use custom config file
   python main.py --mode batch --config custom_config.yaml
 
@@ -370,7 +374,7 @@ Notes:
   - Full mode (outputsize: full) provides up to 20 years of data
   - Compact mode works but with reduced feature windows
   - For best results, use full mode in config.yaml
-        """
+"""
     )
     
     parser.add_argument(
