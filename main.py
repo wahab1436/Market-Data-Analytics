@@ -26,7 +26,7 @@ from src.analysis.similarity_analysis import SimilarityAnalysis
 from src.models.regression import RegressionModels
 from src.models.knn_similarity import KNNSimilarity
 from src.models.xgboost_model import XGBoostModel
-from src.models.explainability import ModelExplainability
+from src.models.explainability import SimilarityAnalysis as ModelExplainability
 from src.dashboard.app import create_app
 
 
@@ -335,7 +335,7 @@ class MarketInsightPlatform:
         print("=" * 60)
         print(f"Market Insight Platform v{self.config['project']['version']}")
         print("=" * 60)
-        print(f"Mode: {mode.UPPER()}")
+        print(f"Mode: {mode.upper()}")
         print(f"Symbols: {', '.join(self.config['data']['symbols'])}")
         print(f"Date Range: {self.config['data']['date_range']['start']} to {self.config['data']['date_range']['end']}")
         print(f"API Output: {self.config.get('data', {}).get('api', {}).get('outputsize', 'unknown')}")
